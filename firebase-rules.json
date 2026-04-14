@@ -1,16 +1,6 @@
 {
   "rules": {
-    "accounts": {
-      "$accountId": {
-        ".read": "auth != null && (auth.uid === $accountId || root.child('emailIndex').child(auth.token.email.replace('.', ',').replace('@', '_at_')).child('accountId').val() === $accountId)",
-        ".write": "auth != null && (auth.uid === $accountId || root.child('emailIndex').child(auth.token.email.replace('.', ',').replace('@', '_at_')).child('accountId').val() === $accountId)"
-      }
-    },
-    "emailIndex": {
-      "$email": {
-        ".read": "auth != null",
-        ".write": "auth != null"
-      }
-    }
+    ".read": "auth != null",
+    ".write": "auth != null"
   }
 }
