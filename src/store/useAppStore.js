@@ -350,12 +350,19 @@ const useAppStore = create(
         debouncedSync(key, get()[key]);
       },
 
-      // ── Get invite code (admin only) ───────────────────────
+      // ── Get invite code (admin only, auto-generates if missing) ──
       getInviteCode: async () => {
         const accountId = get().accountId;
         if (!accountId) return null;
         const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
-        return profile?.inviteCode || null;
+        if (profile?.inviteCode) return profile.inviteCode;
+
+        // Account exists but has no invite code (created before this feature)
+        // Generate one and save it
+        const newCode = generateInviteCode();
+        await saveToFirebase(`accounts/${accountId}/profile/inviteCode`, newCode);
+        await saveToFirebase(`inviteCodes/${newCode}`, accountId);
+        return newCode;
       },
 
       // ── Onboarding (admin only) ────────────────────────────
