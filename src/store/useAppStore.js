@@ -42,13 +42,7 @@ const DEFAULT_SETTINGS = {
 let idCounter = Date.now();
 const genId = (prefix = '') => prefix + (++idCounter).toString(36);
 
-// Generate a short invite code like "PC-7X2K"
-function generateInviteCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return 'PC-' + code;
-}
+// Invite code = the account's Firebase UID (guaranteed unique, no index needed)
 
 // Debounce Firebase writes
 let syncTimers = {};
@@ -157,7 +151,6 @@ const useAppStore = create(
       signup: async (name, email, password, agencyName) => {
         const firebaseUser = await createAccount(email, password);
         const accountId = firebaseUser.uid;
-        const inviteCode = generateInviteCode();
 
         const ownerUser = {
           id: 'owner',
@@ -180,7 +173,6 @@ const useAppStore = create(
           ownerName: name,
           email,
           agencyName: agencyName || 'Principe Consults',
-          inviteCode,
           createdAt: new Date().toISOString(),
           onboardingComplete: false,
         };
@@ -194,9 +186,6 @@ const useAppStore = create(
         await saveToFirebase(`accounts/${accountId}/payoutRequests`, []);
         await saveToFirebase(`accounts/${accountId}/activityLog`, []);
         await saveToFirebase(`accounts/${accountId}/settings`, initialSettings);
-
-        // Create invite code index for rep signups
-        await saveToFirebase(`inviteCodes/${inviteCode}`, accountId);
 
         // Create email index
         await saveToFirebase(`emailIndex/${encodeEmail(email)}`, {
@@ -224,9 +213,10 @@ const useAppStore = create(
 
       // ── Auth: Signup as REP (join existing agency with invite code) ──
       joinAgency: async (name, email, password, inviteCode) => {
-        // Look up the invite code to find the account
-        const accountId = await loadFromFirebase(`inviteCodes/${inviteCode.toUpperCase().trim()}`);
-        if (!accountId) {
+        // The invite code IS the account ID — verify the account exists
+        const accountId = inviteCode.trim();
+        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
+        if (!profile) {
           throw { code: 'invalid-invite', message: 'Invalid invite code. Ask your admin for the correct code.' };
         }
 
@@ -350,26 +340,9 @@ const useAppStore = create(
         debouncedSync(key, get()[key]);
       },
 
-      // ── Get invite code (admin only, auto-generates if missing, always verifies index) ──
+      // ── Get invite code (admin only) — the invite code IS the accountId ──
       getInviteCode: async () => {
-        const accountId = get().accountId;
-        if (!accountId) return null;
-        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
-        let code = profile?.inviteCode;
-
-        if (!code) {
-          // Account exists but has no invite code — generate one
-          code = generateInviteCode();
-          await saveToFirebase(`accounts/${accountId}/profile/inviteCode`, code);
-        }
-
-        // Always verify the invite code index exists (may have failed on previous save)
-        const existing = await loadFromFirebase(`inviteCodes/${code}`);
-        if (!existing) {
-          await saveToFirebase(`inviteCodes/${code}`, accountId);
-        }
-
-        return code;
+        return get().accountId || null;
       },
 
       // ── Onboarding (admin only) ────────────────────────────

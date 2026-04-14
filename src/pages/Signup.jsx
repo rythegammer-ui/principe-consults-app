@@ -274,11 +274,11 @@ export default function Signup() {
                 <label style={labelStyle}>Invite Code</label>
                 <input
                   value={inviteCode}
-                  onChange={e => setInviteCode(e.target.value.toUpperCase())}
-                  placeholder="PC-XXXXXX"
+                  onChange={e => setInviteCode(e.target.value)}
+                  placeholder="Paste the code from your admin"
                   required
                   autoFocus
-                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '16px', textAlign: 'center', letterSpacing: '0.1em' }}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}
                 />
                 <p style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>
                   Get this from your agency admin
