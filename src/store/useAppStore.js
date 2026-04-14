@@ -261,7 +261,7 @@ const useAppStore = create(
         set({
           accountId,
           currentUser: newUser,
-          onboardingComplete: true, // reps skip onboarding — admin already set it up
+          onboardingComplete: false, // reps go through training onboarding
         });
 
         get()._connectToAccount(accountId);
