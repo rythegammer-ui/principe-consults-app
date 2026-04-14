@@ -4,7 +4,7 @@ import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Toolti
 import useAppStore from '../store/useAppStore';
 import { StatCard, StatusBadge, Avatar } from '../components/ui';
 import { getGreeting, formatDate, formatCurrency, relativeTime, STATUS_COLORS, LEAD_STATUSES } from '../utils/formatters';
-import { canAccess } from '../utils/permissions';
+import { canAccess, canSeeAllLeads } from '../utils/permissions';
 import { useIsMobile } from '../utils/hooks';
 import { isToday } from 'date-fns';
 
@@ -20,37 +20,42 @@ export default function Dashboard() {
   const updateLead = useAppStore(s => s.updateLead);
   const addActivity = useAppStore(s => s.addActivity);
 
+  // Reps only see their own leads; admins/managers see all
+  const myLeads = useMemo(() => {
+    return canSeeAllLeads(currentUser?.role) ? leads : leads.filter(l => l.assignedTo === currentUser?.id);
+  }, [leads, currentUser]);
+
   const stats = useMemo(() => {
-    const sequencesActive = leads.filter(l => l.outreachStage === 'Sequence Active').length;
-    const demosBooked = leads.filter(l => l.status === 'Demo Scheduled').length;
-    const closedWon = leads.filter(l => l.status === 'Closed Won').length;
+    const sequencesActive = myLeads.filter(l => l.outreachStage === 'Sequence Active').length;
+    const demosBooked = myLeads.filter(l => l.status === 'Demo Scheduled').length;
+    const closedWon = myLeads.filter(l => l.status === 'Closed Won').length;
     const paidPayments = payments.filter(p => p.status === 'paid');
-    const closedRevenue = leads.filter(l => l.status === 'Closed Won').reduce((s, l) => s + (l.dealValue || 0), 0);
-    const paymentRevenue = paidPayments.reduce((s, p) => s + p.amount, 0);
-    return { totalLeads: leads.length, sequencesActive, demosBooked, closedWon, estRevenue: Math.max(closedRevenue, paymentRevenue) };
-  }, [leads, payments]);
+    const closedRevenue = myLeads.filter(l => l.status === 'Closed Won').reduce((s, l) => s + (l.dealValue || 0), 0);
+    const paymentRevenue = canSeeAllLeads(currentUser?.role) ? paidPayments.reduce((s, p) => s + p.amount, 0) : closedRevenue;
+    return { totalLeads: myLeads.length, sequencesActive, demosBooked, closedWon, estRevenue: Math.max(closedRevenue, paymentRevenue) };
+  }, [myLeads, payments, currentUser]);
 
   const pipelineData = useMemo(() => {
     return LEAD_STATUSES.map(status => ({
       name: status,
-      count: leads.filter(l => l.status === status).length,
+      count: myLeads.filter(l => l.status === status).length,
       fill: STATUS_COLORS[status]?.text || 'var(--text2)',
     }));
-  }, [leads]);
+  }, [myLeads]);
 
   const typeData = useMemo(() => {
     const counts = {};
-    leads.forEach(l => { counts[l.type] = (counts[l.type] || 0) + 1; });
+    myLeads.forEach(l => { counts[l.type] = (counts[l.type] || 0) + 1; });
     return Object.entries(counts).map(([name, value], i) => ({
       name,
       value,
       color: TYPE_COLORS[i % TYPE_COLORS.length],
     }));
-  }, [leads]);
+  }, [myLeads]);
 
   const todayTasks = useMemo(() => {
-    return leads.filter(l => l.followUpDate && isToday(new Date(l.followUpDate)));
-  }, [leads]);
+    return myLeads.filter(l => l.followUpDate && isToday(new Date(l.followUpDate)));
+  }, [myLeads]);
 
   const recentActivity = useMemo(() => {
     return activityLog.slice(-15).reverse();

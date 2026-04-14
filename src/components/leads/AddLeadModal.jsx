@@ -6,11 +6,14 @@ import { BUSINESS_TYPES, DFW_CITIES, SOURCES, TIER_OPTIONS } from '../../utils/f
 export default function AddLeadModal({ open, onClose }) {
   const addLead = useAppStore(s => s.addLead);
   const users = useAppStore(s => s.users);
+  const currentUser = useAppStore(s => s.currentUser);
   const addNotification = useAppStore(s => s.addNotification);
+  // Auto-assign to current user if they're a rep
+  const defaultAssign = currentUser?.role === 'rep' ? currentUser.id : '';
   const [form, setForm] = useState({
     businessName: '', type: 'Auto Shop', ownerName: '', city: 'Dallas',
     phone: '', email: '', hasWebsite: false, websiteUrl: '', rating: 0,
-    assignedTo: '', notes: '', source: 'Cold Call', tierFit: 'TBD', dealValue: 0,
+    assignedTo: defaultAssign, notes: '', source: 'Cold Call', tierFit: 'TBD', dealValue: 0,
   });
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
@@ -23,7 +26,7 @@ export default function AddLeadModal({ open, onClose }) {
     setForm({
       businessName: '', type: 'Auto Shop', ownerName: '', city: 'Dallas',
       phone: '', email: '', hasWebsite: false, websiteUrl: '', rating: 0,
-      assignedTo: '', notes: '', source: 'Cold Call', tierFit: 'TBD', dealValue: 0,
+      assignedTo: defaultAssign, notes: '', source: 'Cold Call', tierFit: 'TBD', dealValue: 0,
     });
     onClose();
   };

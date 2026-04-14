@@ -5,22 +5,34 @@ import { StatCard, OutcomeBadge, EmptyState } from '../components/ui';
 import LogCallModal from '../components/calls/LogCallModal';
 import CallHistory from '../components/calls/CallHistory';
 import { formatPhone, relativeTime, formatDate } from '../utils/formatters';
+import { canSeeAllLeads } from '../utils/permissions';
 import { exportCallsCSV, downloadCSV } from '../utils/csv';
 import { isToday, startOfWeek, isAfter, isBefore } from 'date-fns';
 
 export default function CallTracker() {
-  const leads = useAppStore(s => s.leads);
+  const currentUser = useAppStore(s => s.currentUser);
+  const allLeads = useAppStore(s => s.leads);
   const callLogs = useAppStore(s => s.callLogs);
   const [showLogCall, setShowLogCall] = useState(false);
   const [expandedLead, setExpandedLead] = useState(null);
 
+  // Reps only see their own leads' calls
+  const leads = useMemo(() => {
+    return canSeeAllLeads(currentUser?.role) ? allLeads : allLeads.filter(l => l.assignedTo === currentUser?.id);
+  }, [allLeads, currentUser]);
+
+  const myLeadIds = useMemo(() => new Set(leads.map(l => l.id)), [leads]);
+  const myCallLogs = useMemo(() => {
+    return canSeeAllLeads(currentUser?.role) ? callLogs : callLogs.filter(c => myLeadIds.has(c.leadId));
+  }, [callLogs, myLeadIds, currentUser]);
+
   const stats = useMemo(() => {
-    const today = callLogs.filter(c => c.timestamp && isToday(new Date(c.timestamp)));
+    const today = myCallLogs.filter(c => c.timestamp && isToday(new Date(c.timestamp)));
     const weekStart = startOfWeek(new Date());
-    const thisWeek = callLogs.filter(c => c.timestamp && isAfter(new Date(c.timestamp), weekStart));
-    const noAnswers = callLogs.filter(c => c.outcome === 'No Answer');
-    const callbacks = callLogs.filter(c => c.outcome === 'Callback Requested');
-    const booked = callLogs.filter(c => c.outcome === 'Booked');
+    const thisWeek = myCallLogs.filter(c => c.timestamp && isAfter(new Date(c.timestamp), weekStart));
+    const noAnswers = myCallLogs.filter(c => c.outcome === 'No Answer');
+    const callbacks = myCallLogs.filter(c => c.outcome === 'Callback Requested');
+    const booked = myCallLogs.filter(c => c.outcome === 'Booked');
     return {
       today: today.length,
       thisWeek: thisWeek.length,
@@ -28,12 +40,12 @@ export default function CallTracker() {
       callbacks: callbacks.length,
       booked: booked.length,
     };
-  }, [callLogs]);
+  }, [myCallLogs]);
 
   // Group calls by lead
   const leadsWithCalls = useMemo(() => {
     const leadCallMap = {};
-    callLogs.forEach(c => {
+    myCallLogs.forEach(c => {
       if (!leadCallMap[c.leadId]) leadCallMap[c.leadId] = [];
       leadCallMap[c.leadId].push(c);
     });
