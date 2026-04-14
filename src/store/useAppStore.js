@@ -213,15 +213,19 @@ const useAppStore = create(
 
       // ── Auth: Signup as REP (join existing agency with invite code) ──
       joinAgency: async (name, email, password, inviteCode) => {
-        // The invite code IS the account ID — verify the account exists
         const accountId = inviteCode.trim();
+
+        // Create Firebase Auth account FIRST so we're authenticated
+        // (Firebase rules require auth for reads)
+        const firebaseUser = await createAccount(email, password);
+
+        // Now verify the invite code (account ID) is valid
         const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
         if (!profile) {
+          // Invalid code — sign out the newly created auth account
+          try { await signOut(); } catch (e) { /* ignore */ }
           throw { code: 'invalid-invite', message: 'Invalid invite code. Ask your admin for the correct code.' };
         }
-
-        // Create Firebase Auth account for the rep
-        const firebaseUser = await createAccount(email, password);
 
         const newUser = {
           id: genId('U'),
