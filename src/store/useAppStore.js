@@ -245,9 +245,6 @@ const useAppStore = create(
           role: 'rep',
         });
 
-        // Load account data
-        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
-
         set({
           accountId,
           currentUser: newUser,
