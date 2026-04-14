@@ -14,7 +14,7 @@ import {
 
 // ── Default settings for new accounts ───────────────────────
 const DEFAULT_SETTINGS = {
-  agencyName: '',
+  agencyName: 'Principe Consults',
   ownerName: '',
   defaultCity: 'DFW',
   agencyPhone: '',
@@ -41,6 +41,14 @@ const DEFAULT_SETTINGS = {
 
 let idCounter = Date.now();
 const genId = (prefix = '') => prefix + (++idCounter).toString(36);
+
+// Generate a short invite code like "PC-7X2K"
+function generateInviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return 'PC-' + code;
+}
 
 // Debounce Firebase writes
 let syncTimers = {};
@@ -93,26 +101,32 @@ const useAppStore = create(
 
         onAuthChanged(async (firebaseUser) => {
           if (firebaseUser) {
-            const accountId = firebaseUser.uid;
+            const uid = firebaseUser.uid;
+
+            // Look up which account this user belongs to
+            const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(firebaseUser.email)}`);
+            const accountId = emailData?.accountId || uid;
+            const userId = emailData?.userId || 'owner';
+
             set({ accountId });
 
-            // Load account data from Firebase
+            // Load account profile
             const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
             if (profile) {
-              // Account exists — load all data
-              const ownerUser = {
-                id: 'owner',
-                name: profile.ownerName,
-                email: profile.email,
-                role: 'admin',
-                avatar: (profile.ownerName || '').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-                active: true,
-              };
-              set({
-                currentUser: ownerUser,
-                onboardingComplete: profile.onboardingComplete !== false,
-                authLoading: false,
-              });
+              // Load users list to find this user's info
+              const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
+              const userList = normalizeData(usersData) || [];
+              const matchedUser = userList.find(u => u.id === userId) || userList[0];
+
+              if (matchedUser) {
+                set({
+                  currentUser: { ...matchedUser, password: undefined },
+                  onboardingComplete: profile.onboardingComplete !== false,
+                  authLoading: false,
+                });
+              } else {
+                set({ authLoading: false });
+              }
               get()._connectToAccount(accountId);
             } else {
               // Account record doesn't exist yet (mid-signup)
@@ -139,10 +153,11 @@ const useAppStore = create(
         });
       },
 
-      // ── Auth: Signup (create new account) ───────────────────
+      // ── Auth: Signup as ADMIN (creates a new agency account) ──
       signup: async (name, email, password, agencyName) => {
         const firebaseUser = await createAccount(email, password);
         const accountId = firebaseUser.uid;
+        const inviteCode = generateInviteCode();
 
         const ownerUser = {
           id: 'owner',
@@ -155,16 +170,17 @@ const useAppStore = create(
 
         const initialSettings = {
           ...DEFAULT_SETTINGS,
-          agencyName: agencyName || `${name}'s Agency`,
+          agencyName: agencyName || 'Principe Consults',
           ownerName: name,
           agencyEmail: email,
         };
 
-        // Create account profile in Firebase
+        // Create account profile
         const profile = {
           ownerName: name,
           email,
-          agencyName: agencyName || `${name}'s Agency`,
+          agencyName: agencyName || 'Principe Consults',
+          inviteCode,
           createdAt: new Date().toISOString(),
           onboardingComplete: false,
         };
@@ -179,7 +195,10 @@ const useAppStore = create(
         await saveToFirebase(`accounts/${accountId}/activityLog`, []);
         await saveToFirebase(`accounts/${accountId}/settings`, initialSettings);
 
-        // Create email index for team member lookups
+        // Create invite code index for rep signups
+        await saveToFirebase(`inviteCodes/${inviteCode}`, accountId);
+
+        // Create email index
         await saveToFirebase(`emailIndex/${encodeEmail(email)}`, {
           accountId,
           userId: 'owner',
@@ -199,59 +218,86 @@ const useAppStore = create(
           onboardingComplete: false,
         });
 
-        // Connect to real-time sync
         get()._connectToAccount(accountId);
         return true;
       },
 
-      // ── Auth: Login (Firebase Auth for owners, DB check for team) ──
+      // ── Auth: Signup as REP (join existing agency with invite code) ──
+      joinAgency: async (name, email, password, inviteCode) => {
+        // Look up the invite code to find the account
+        const accountId = await loadFromFirebase(`inviteCodes/${inviteCode.toUpperCase().trim()}`);
+        if (!accountId) {
+          throw { code: 'invalid-invite', message: 'Invalid invite code. Ask your admin for the correct code.' };
+        }
+
+        // Create Firebase Auth account for the rep
+        const firebaseUser = await createAccount(email, password);
+
+        const newUser = {
+          id: genId('U'),
+          name,
+          email,
+          role: 'rep',
+          avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
+          active: true,
+        };
+
+        // Add rep to the account's users list
+        const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
+        const userList = normalizeData(usersData) || [];
+        userList.push(newUser);
+        await saveToFirebase(`accounts/${accountId}/users`, userList);
+
+        // Create email index pointing to this account
+        await saveToFirebase(`emailIndex/${encodeEmail(email)}`, {
+          accountId,
+          userId: newUser.id,
+          role: 'rep',
+        });
+
+        // Load account data
+        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
+
+        set({
+          accountId,
+          currentUser: newUser,
+          onboardingComplete: true, // reps skip onboarding — admin already set it up
+        });
+
+        get()._connectToAccount(accountId);
+        return true;
+      },
+
+      // ── Auth: Login ─────────────────────────────────────────
       login: async (email, password) => {
         try {
-          // Try Firebase Auth first (account owners)
+          // Firebase Auth sign-in (works for both owners and reps)
           const firebaseUser = await signIn(email, password);
-          const accountId = firebaseUser.uid;
 
-          // Load profile
+          // Look up which account this user belongs to
+          const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(email)}`);
+          if (!emailData) return false;
+
+          const { accountId, userId } = emailData;
+
+          // Load the user's info from the account
+          const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
+          const userList = normalizeData(usersData) || [];
+          const user = userList.find(u => u.id === userId);
+          if (!user) return false;
+
           const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
-          const ownerUser = {
-            id: 'owner',
-            name: profile?.ownerName || email,
-            email,
-            role: 'admin',
-            avatar: (profile?.ownerName || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-            active: true,
-          };
 
           set({
             accountId,
-            currentUser: ownerUser,
+            currentUser: { ...user, password: undefined },
             onboardingComplete: profile?.onboardingComplete !== false,
           });
           get()._connectToAccount(accountId);
           return true;
         } catch (authErr) {
-          // Not a Firebase Auth user — check if team member via email index
-          try {
-            const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(email)}`);
-            if (!emailData) return false;
-
-            const { accountId, userId } = emailData;
-            const users = await loadFromFirebase(`accounts/${accountId}/users`);
-            const userList = normalizeData(users) || [];
-            const user = userList.find(u => u.id === userId && u.password === password && u.active);
-            if (!user) return false;
-
-            set({
-              accountId,
-              currentUser: { ...user, password: undefined },
-              onboardingComplete: true,
-            });
-            get()._connectToAccount(accountId);
-            return true;
-          } catch (indexErr) {
-            console.error('Team member login failed:', indexErr);
-            return false;
-          }
+          console.error('Login failed:', authErr);
+          return false;
         }
       },
 
@@ -277,7 +323,6 @@ const useAppStore = create(
 
       // ── Internal: Connect to account's real-time data ──────
       _connectToAccount: (accountId) => {
-        // Disconnect any existing subscriptions first
         get()._disconnectAccount();
 
         const unsubs = SYNC_KEYS.map(key => {
@@ -305,7 +350,15 @@ const useAppStore = create(
         debouncedSync(key, get()[key]);
       },
 
-      // ── Onboarding ─────────────────────────────────────────
+      // ── Get invite code (admin only) ───────────────────────
+      getInviteCode: async () => {
+        const accountId = get().accountId;
+        if (!accountId) return null;
+        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
+        return profile?.inviteCode || null;
+      },
+
+      // ── Onboarding (admin only) ────────────────────────────
       completeOnboarding: async (settingsPatch) => {
         const accountId = get().accountId;
         if (!accountId) return;
@@ -526,7 +579,7 @@ const useAppStore = create(
         });
       },
 
-      // Legacy compat: connectFirebase / seedFirebase / pullFromFirebase
+      // Legacy compat
       connectFirebase: () => {
         const accountId = get().accountId;
         if (accountId && !get().firebaseConnected) {

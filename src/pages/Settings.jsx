@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Eye, EyeOff, Cloud, Upload, Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Eye, EyeOff, Cloud, Upload, Download, Copy, Check, Users } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import { ConfirmDialog } from '../components/ui';
 
@@ -11,12 +11,22 @@ export default function Settings() {
   const firebaseConnected = useAppStore(s => s.firebaseConnected);
   const seedFirebase = useAppStore(s => s.seedFirebase);
   const pullFromFirebase = useAppStore(s => s.pullFromFirebase);
+  const getInviteCode = useAppStore(s => s.getInviteCode);
+  const currentUser = useAppStore(s => s.currentUser);
   const [form, setForm] = useState({ ...settings });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showStripeKey, setShowStripeKey] = useState(false);
   const [showGhlKey, setShowGhlKey] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [showClear, setShowClear] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      getInviteCode().then(code => { if (code) setInviteCode(code); });
+    }
+  }, [currentUser]);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -57,6 +67,48 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Team Invite Code (admin only) */}
+      {currentUser?.role === 'admin' && inviteCode && (
+        <div style={sectionStyle}>
+          <h3 style={sectionTitleStyle}>
+            <Users size={18} style={{ marginRight: '8px', display: 'inline', color: 'var(--red)' }} />
+            Team Invite Code
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '16px' }}>
+            Share this code with your sales reps so they can sign up and join your agency. They'll see the same leads, pipeline, and data.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              background: 'var(--surface2)',
+              border: '2px dashed var(--red)',
+              borderRadius: '10px',
+              padding: '14px 24px',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '22px',
+              fontWeight: 700,
+              letterSpacing: '0.15em',
+              color: 'var(--text)',
+            }}>
+              {inviteCode}
+            </div>
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                navigator.clipboard.writeText(inviteCode);
+                setCodeCopied(true);
+                setTimeout(() => setCodeCopied(false), 2000);
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              {codeCopied ? <><Check size={14} style={{ color: 'var(--green)' }} /> Copied!</> : <><Copy size={14} /> Copy</>}
+            </button>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '10px' }}>
+            Reps go to the signup page, choose "I Have an Invite Code", and enter this code.
+          </p>
+        </div>
+      )}
 
       {/* Deal Settings */}
       <div style={sectionStyle}>
