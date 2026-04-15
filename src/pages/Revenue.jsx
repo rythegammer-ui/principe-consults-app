@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, DollarSign, TrendingUp, AlertCircle, CreditCard, Percent, BarChart3 } from 'lucide-react';
+import { Plus, DollarSign, TrendingUp, AlertCircle, CreditCard, Percent, BarChart3, Send, Download } from 'lucide-react';
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import useAppStore from '../store/useAppStore';
 import { StatCard, EmptyState } from '../components/ui';
@@ -7,18 +7,38 @@ import PaymentsTable from '../components/payments/PaymentsTable';
 import AddPaymentModal from '../components/payments/AddPaymentModal';
 import StripeSync from '../components/payments/StripeSync';
 import CommissionTracker from '../components/payments/CommissionTracker';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
+import { getPaymentStatus } from '../lib/paymentLinks';
+import { calculateLeadScore } from '../lib/leadScoring';
 import { useIsMobile } from '../utils/hooks';
+import { downloadCSV } from '../utils/csv';
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 
 const TIER_COLORS = { Launchpad: '#e63228', 'Growth Engine': '#60a5fa', 'Full Stack': '#a78bfa', Custom: '#fb923c' };
 
 export default function Revenue() {
   const payments = useAppStore(s => s.payments);
+  const leads = useAppStore(s => s.leads);
   const settings = useAppStore(s => s.settings);
   const currentUser = useAppStore(s => s.currentUser);
   const [showAddPayment, setShowAddPayment] = useState(false);
+  const [revenueTab, setRevenueTab] = useState('overview');
   const isMobile = useIsMobile();
+
+  // Leads with payment links
+  const paymentLinkLeads = useMemo(() => {
+    return leads.filter(l => l.paymentLinks && l.paymentLinks.length > 0).map(l => {
+      const ps = getPaymentStatus(l);
+      const latest = l.paymentLinks[l.paymentLinks.length - 1];
+      return { ...l, paymentStatusInfo: ps, latestPaymentLink: latest };
+    });
+  }, [leads]);
+
+  // Pipeline value
+  const pipelineValue = useMemo(() => {
+    const active = leads.filter(l => !['Closed Won', 'Dead'].includes(l.status));
+    return active.reduce((sum, l) => sum + (l.dealValue || 0), 0);
+  }, [leads]);
 
   const stats = useMemo(() => {
     const paid = payments.filter(p => p.status === 'paid');
@@ -72,6 +92,86 @@ export default function Revenue() {
         <StatCard label="Avg Deal Size" value={stats.avgDeal} color="var(--purple)" icon={BarChart3} prefix="$" />
         <StatCard label="Payments This Month" value={stats.monthPayments} color="var(--teal)" icon={CreditCard} />
         <StatCard label="Collection Rate" value={`${stats.collectionRate}%`} color="var(--green)" icon={Percent} />
+      </div>
+
+      {/* Revenue Tabs */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
+        {[
+          { id: 'overview', label: 'Overview' },
+          { id: 'paymentlinks', label: `Payment Links (${paymentLinkLeads.length})` },
+        ].map(t => (
+          <button key={t.id} onClick={() => setRevenueTab(t.id)} style={{
+            padding: '10px 16px', fontSize: '13px', fontWeight: revenueTab === t.id ? 700 : 500,
+            color: revenueTab === t.id ? 'var(--red)' : 'var(--text2)',
+            background: 'none', border: 'none', borderBottom: revenueTab === t.id ? '2px solid var(--red)' : '2px solid transparent',
+            cursor: 'pointer', fontFamily: "'Manrope', sans-serif", marginBottom: '-1px',
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Payment Links Tab */}
+      {revenueTab === 'paymentlinks' && (
+        <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Payment Links Sent</h3>
+            <button className="btn-ghost" onClick={() => {
+              const csv = ['Business,Tier,Sent Date,Status,Amount\n',
+                ...paymentLinkLeads.map(l => `"${l.businessName}","${l.latestPaymentLink?.tierName}","${l.latestPaymentLink?.sentAt}","${l.paymentStatusInfo?.status}","${l.dealValue || ''}"`)
+              ].join('\n');
+              downloadCSV(csv, 'payment-links-export.csv');
+            }} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+              <Download size={14} /> Export
+            </button>
+          </div>
+          {paymentLinkLeads.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: '13px', textAlign: 'center', padding: '20px' }}>No payment links sent yet.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Business</th>
+                  <th>Package</th>
+                  <th>Sent</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentLinkLeads.map(l => (
+                  <tr key={l.id}>
+                    <td style={{ fontWeight: 600 }}>{l.businessName}</td>
+                    <td>{l.latestPaymentLink?.tierName || '—'}</td>
+                    <td style={{ fontSize: '12px', color: 'var(--text2)' }}>{l.latestPaymentLink?.sentAt ? formatDate(l.latestPaymentLink.sentAt) : '—'}</td>
+                    <td>
+                      <span style={{
+                        padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600,
+                        background: l.paymentStatusInfo?.status === 'paid' ? 'rgba(34,197,94,0.15)' : l.paymentStatusInfo?.status === 'overdue' ? 'rgba(230,50,40,0.15)' : 'rgba(245,158,11,0.15)',
+                        color: l.paymentStatusInfo?.color || 'var(--text2)',
+                      }}>
+                        {l.paymentStatusInfo?.status || 'sent'}
+                      </span>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{l.dealValue ? formatCurrency(l.dealValue) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {revenueTab === 'overview' && <>
+      {/* Pipeline Value */}
+      <div className="card" style={{ padding: '16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: '12px', color: 'var(--text2)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>Pipeline Value (Active Leads)</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--blue)', fontFamily: "'Syne', sans-serif" }}>{formatCurrency(pipelineValue)}</div>
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text2)' }}>
+          {leads.filter(l => !['Closed Won', 'Dead'].includes(l.status)).length} active leads
+        </div>
       </div>
 
       {/* Charts */}
@@ -131,6 +231,7 @@ export default function Revenue() {
 
       {/* Stripe Integration */}
       <StripeSync />
+      </>}
 
       <AddPaymentModal open={showAddPayment} onClose={() => setShowAddPayment(false)} />
     </div>

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, BarChart3 } from 'lucide-react';
+import { Plus, BarChart3, Activity } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import useAppStore from '../store/useAppStore';
 import { Modal, Avatar, RoleBadge, EmptyState, StatusBadge } from '../components/ui';
@@ -33,9 +33,24 @@ export default function Team() {
       const userLeads = leads.filter(l => l.assignedTo === u.id);
       const userCalls = callLogs.filter(c => c.calledBy === u.name);
       const demos = userLeads.filter(l => ['Demo Scheduled', 'Demo Completed', 'Proposal Sent', 'Closed Won'].includes(l.status)).length;
-      return { user: u, leadsCount: userLeads.length, callsThisWeek: userCalls.length, demos };
+      const closes = userLeads.filter(l => l.status === 'Closed Won').length;
+
+      // Rep Health Score (0-100)
+      const callScore = Math.min(40, (userCalls.length / 20) * 40); // 40% weight, 20 calls = max
+      const pipelineScore = Math.min(30, (demos / 5) * 30); // 30% weight, 5 demos = max
+      const activityScore = Math.min(30, (userLeads.length / 10) * 30); // 30% weight, 10 leads = max
+      const healthScore = Math.round(callScore + pipelineScore + activityScore);
+
+      // Last active
+      const userActivities = activityLog.filter(a => a.userId === u.id);
+      const lastActive = userActivities.length > 0 ? userActivities[userActivities.length - 1].timestamp : null;
+
+      // Close rate (30 day)
+      const closeRate = userCalls.length > 0 ? Math.round((closes / userCalls.length) * 100) : 0;
+
+      return { user: u, leadsCount: userLeads.length, callsThisWeek: userCalls.length, demos, closes, healthScore, lastActive, closeRate };
     });
-  }, [users, leads, callLogs]);
+  }, [users, leads, callLogs, activityLog]);
 
   const perfUser = users.find(u => u.id === showPerf);
 
@@ -79,17 +94,18 @@ export default function Team() {
           <thead>
             <tr>
               <th>Member</th>
-              <th>Email</th>
+              <th>Health</th>
               <th>Role</th>
               <th>Leads</th>
               <th>Calls</th>
               <th>Demos</th>
-              <th>Status</th>
+              <th>Close %</th>
+              <th>Last Active</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {teamData.map(({ user: u, leadsCount, callsThisWeek, demos }) => (
+            {teamData.map(({ user: u, leadsCount, callsThisWeek, demos, healthScore, lastActive, closeRate }) => (
               <tr key={u.id}>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -97,19 +113,24 @@ export default function Team() {
                     <span style={{ fontWeight: 600 }}>{u.name}</span>
                   </div>
                 </td>
-                <td style={{ fontSize: '13px', color: 'var(--text2)' }}>{u.email}</td>
+                <td>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    background: healthScore >= 70 ? 'rgba(34,197,94,0.15)' : healthScore >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(230,50,40,0.15)',
+                    color: healthScore >= 70 ? 'var(--green)' : healthScore >= 40 ? 'var(--yellow)' : 'var(--red)',
+                  }}>
+                    <Activity size={12} /> {healthScore}
+                  </span>
+                </td>
                 <td><RoleBadge role={u.role} /></td>
                 <td>{leadsCount}</td>
                 <td>{callsThisWeek}</td>
                 <td style={{ fontWeight: 600 }}>{demos}</td>
-                <td>
-                  <span style={{
-                    padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                    background: u.active ? 'rgba(34,197,94,0.15)' : 'rgba(85,85,85,0.15)',
-                    color: u.active ? 'var(--green)' : 'var(--muted)',
-                  }}>
-                    {u.active ? 'Active' : 'Inactive'}
-                  </span>
+                <td style={{ fontSize: '13px', color: closeRate >= 10 ? 'var(--green)' : 'var(--text2)' }}>{closeRate}%</td>
+                <td style={{ fontSize: '12px', color: 'var(--text2)' }}>
+                  {lastActive ? format(new Date(lastActive), 'MMM d, h:mm a') : '—'}
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: '6px' }}>

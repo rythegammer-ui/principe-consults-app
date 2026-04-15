@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Upload, Download, Search, Flame } from 'lucide-react';
+import { Plus, Upload, Download, Search, Flame, RefreshCw } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import LeadTable from '../components/leads/LeadTable';
 import AddLeadModal from '../components/leads/AddLeadModal';
@@ -8,7 +8,9 @@ import { EmptyState } from '../components/ui';
 import { canSeeAllLeads } from '../utils/permissions';
 import { LEAD_STATUSES, BUSINESS_TYPES, DFW_CITIES } from '../utils/formatters';
 import { calculateLeadScore } from '../lib/leadScoring';
+import { getColdLeads, generateReengagementSequence, markLeadsReengaged } from '../lib/reengagement';
 import { exportLeadsCSV, downloadCSV } from '../utils/csv';
+import { canAccess } from '../utils/permissions';
 import { useIsMobile } from '../utils/hooks';
 
 export default function Leads() {
@@ -109,6 +111,22 @@ export default function Leads() {
             >
               <Flame size={14} /> Hot Leads
             </button>
+
+            {canAccess(currentUser?.role, 'Team') && getColdLeads().length > 0 && (
+              <button
+                className="btn-ghost"
+                onClick={async () => {
+                  const cold = getColdLeads();
+                  const seq = await generateReengagementSequence(cold);
+                  if (seq) {
+                    markLeadsReengaged(cold.map(l => l.id));
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px', padding: '0 14px', borderColor: 'var(--yellow)', color: 'var(--yellow)' }}
+              >
+                <RefreshCw size={14} /> Re-engage ({getColdLeads().length})
+              </button>
+            )}
           </>
         )}
 
