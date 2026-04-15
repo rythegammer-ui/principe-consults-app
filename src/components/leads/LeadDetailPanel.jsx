@@ -1,10 +1,11 @@
 import { useState, useMemo, Component } from 'react';
-import { X, Phone, Mail, Globe, MapPin, ExternalLink, MessageSquare, FileText, CreditCard, Send } from 'lucide-react';
+import { X, Phone, Mail, Globe, MapPin, ExternalLink, MessageSquare, FileText, CreditCard, Send, Zap, Pause, Play, XCircle } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { StatusBadge, StarRating, OutcomeBadge, CopyButton, PaymentStatusBadge } from '../ui';
 import { formatPhone, formatDate, formatCurrency, LEAD_STATUSES } from '../../utils/formatters';
 import { calculateLeadScore, getScoreColor } from '../../lib/leadScoring';
 import { sendPaymentLink, getPaymentStatus, getTierInfo, getPaymentUrl } from '../../lib/paymentLinks';
+import { getSequenceStatus, enrollInSequence, pauseSequence, resumeSequence, cancelSequence } from '../../lib/emailAutomation';
 import LogCallModal from '../calls/LogCallModal';
 import ProposalModal from './ProposalModal';
 import GHLMessaging from '../ghl/GHLMessaging';
@@ -267,6 +268,69 @@ function PanelContent({ leadId, onClose }) {
             </div>
           </div>
         )}
+
+        {/* Email/SMS Sequence */}
+        <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+          <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
+            <Zap size={14} style={{ marginRight: '6px', display: 'inline' }} />
+            Email/SMS Sequence
+          </h4>
+          {(() => {
+            const seq = getSequenceStatus(lead);
+            if (!seq) {
+              return (
+                <div>
+                  <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '10px' }}>No active sequence</p>
+                  <button className="btn-red" onClick={() => enrollInSequence(lead.id, 'growth')} style={{ fontSize: '12px', padding: '6px 14px' }}>
+                    <Zap size={12} style={{ marginRight: '4px', display: 'inline' }} /> Start Sequence
+                  </button>
+                </div>
+              );
+            }
+            const statusColors = { active: 'var(--green)', paused: 'var(--yellow)', completed: 'var(--blue)', cancelled: 'var(--muted)' };
+            return (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <span style={{
+                    padding: '3px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 600,
+                    background: `${statusColors[seq.status]}20`, color: statusColors[seq.status],
+                    textTransform: 'capitalize',
+                  }}>
+                    {seq.status}
+                  </span>
+                  <span style={{ fontSize: '12px', color: 'var(--text2)' }}>
+                    Step {seq.currentStep + 1} of {seq.totalSteps}
+                  </span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>({seq.tier})</span>
+                </div>
+                {/* Progress bar */}
+                <div style={{ height: '4px', background: 'var(--surface3)', borderRadius: '2px', marginBottom: '10px' }}>
+                  <div style={{ height: '100%', width: `${((seq.currentStep + 1) / seq.totalSteps) * 100}%`, background: statusColors[seq.status], borderRadius: '2px', transition: 'width 0.3s' }} />
+                </div>
+                {seq.status === 'active' && (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button className="btn-ghost" onClick={() => pauseSequence(lead.id)} style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Pause size={12} /> Pause
+                    </button>
+                    <button className="btn-ghost" onClick={() => cancelSequence(lead.id)} style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--red)' }}>
+                      <XCircle size={12} /> Cancel
+                    </button>
+                  </div>
+                )}
+                {seq.status === 'paused' && (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button className="btn-red" onClick={() => resumeSequence(lead.id)} style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Play size={12} /> Resume
+                    </button>
+                    <button className="btn-ghost" onClick={() => cancelSequence(lead.id)} style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--red)' }}>
+                      <XCircle size={12} /> Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
 
         {/* GHL Messaging */}
         <GHLMessaging lead={lead} />
