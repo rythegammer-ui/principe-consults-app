@@ -425,9 +425,15 @@ const useAppStore = create(
       moveLeadStatus: (leadId, newStatus) => {
         const lead = get().leads.find(l => l.id === leadId);
         const oldStatus = lead?.status;
-        set(s => ({ leads: s.leads.map(l => l.id === leadId ? { ...l, status: newStatus } : l) }));
+        set(s => ({ leads: s.leads.map(l => l.id === leadId ? { ...l, status: newStatus, lastActivityAt: new Date().toISOString(), isStale: false } : l) }));
         if (lead) {
           get().addActivity(`"${lead.businessName}" moved from ${oldStatus} to ${newStatus}`, 'pipeline', get().currentUser?.id, leadId);
+          // Fire pipeline automation triggers
+          try {
+            import('../lib/pipelineTriggers').then(({ onStageChange }) => {
+              onStageChange({ ...lead, status: newStatus }, oldStatus, newStatus);
+            });
+          } catch (e) { /* non-blocking */ }
         }
         get()._syncKey('leads');
       },

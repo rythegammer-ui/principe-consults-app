@@ -1,8 +1,10 @@
 import { useState, useMemo, Component } from 'react';
-import { X, Phone, Mail, Globe, MapPin, ExternalLink, MessageSquare, FileText } from 'lucide-react';
+import { X, Phone, Mail, Globe, MapPin, ExternalLink, MessageSquare, FileText, CreditCard, Send } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { StatusBadge, StarRating, OutcomeBadge, CopyButton, PaymentStatusBadge } from '../ui';
 import { formatPhone, formatDate, formatCurrency, LEAD_STATUSES } from '../../utils/formatters';
+import { calculateLeadScore, getScoreColor } from '../../lib/leadScoring';
+import { sendPaymentLink, getPaymentStatus, getTierInfo, getPaymentUrl } from '../../lib/paymentLinks';
 import LogCallModal from '../calls/LogCallModal';
 import ProposalModal from './ProposalModal';
 import GHLMessaging from '../ghl/GHLMessaging';
@@ -47,6 +49,9 @@ function PanelContent({ leadId, onClose }) {
   const [showProposal, setShowProposal] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState('');
+  const [paymentModal, setPaymentModal] = useState(null); // null or tierKey
+  const [sendMethod, setSendMethod] = useState('sms');
+  const [sendingPayment, setSendingPayment] = useState(false);
 
   if (!lead) {
     return (
@@ -153,6 +158,115 @@ function PanelContent({ leadId, onClose }) {
             <FileText size={14} style={{ marginRight: '6px', display: 'inline' }} />{lead.proposal ? 'View Proposal' : 'Generate Proposal'}
           </button>
         </div>
+
+        {/* Lead Score */}
+        {(() => {
+          const score = calculateLeadScore(lead);
+          const sc = getScoreColor(score);
+          return (
+            <div className="card" style={{ padding: '14px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  fontSize: '20px', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+                  color: sc.text,
+                }}>
+                  {score}
+                </span>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600 }}>Lead Score</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text2)' }}>{sc.label}</div>
+                </div>
+              </div>
+              <span style={{
+                padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600,
+                background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`,
+              }}>
+                {sc.label}
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* Payment Links */}
+        <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+          <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
+            <CreditCard size={14} style={{ marginRight: '6px', display: 'inline' }} />
+            Send Payment Link
+          </h4>
+          {(() => {
+            const ps = getPaymentStatus(lead);
+            if (ps) {
+              return (
+                <div style={{ padding: '8px 12px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px',
+                  background: ps.status === 'paid' ? 'rgba(34,197,94,0.1)' : ps.status === 'overdue' ? 'rgba(230,50,40,0.1)' : 'rgba(245,158,11,0.1)',
+                  color: ps.color, fontWeight: 600,
+                }}>
+                  {ps.status === 'paid' ? 'Paid' : ps.status === 'overdue' ? 'Overdue' : 'Payment Sent'} — {ps.tier}
+                </div>
+              );
+            }
+            return null;
+          })()}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {['launchpad', 'growth', 'fullstack'].map(tierKey => {
+              const tier = getTierInfo(tierKey);
+              const hasUrl = !!getPaymentUrl(tierKey);
+              return (
+                <button
+                  key={tierKey}
+                  className="btn-ghost"
+                  disabled={!hasUrl}
+                  onClick={() => setPaymentModal(tierKey)}
+                  style={{ fontSize: '12px', padding: '8px 12px', opacity: hasUrl ? 1 : 0.4 }}
+                >
+                  {tier.name} — {tier.price}
+                </button>
+              );
+            })}
+          </div>
+          {!getPaymentUrl('launchpad') && !getPaymentUrl('growth') && !getPaymentUrl('fullstack') && (
+            <p style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '8px' }}>
+              Set up payment links in Settings &gt; Integrations
+            </p>
+          )}
+        </div>
+
+        {/* Payment Send Modal */}
+        {paymentModal && (
+          <div className="card" style={{ padding: '16px', marginBottom: '16px', border: '1px solid var(--red)' }}>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px' }}>
+              Send {getTierInfo(paymentModal).name} Link
+            </h4>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              {['sms', 'email', 'both'].map(m => (
+                <button
+                  key={m}
+                  className={sendMethod === m ? 'btn-red' : 'btn-ghost'}
+                  onClick={() => setSendMethod(m)}
+                  style={{ fontSize: '12px', padding: '6px 14px', textTransform: 'capitalize' }}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className="btn-red"
+                disabled={sendingPayment}
+                onClick={async () => {
+                  setSendingPayment(true);
+                  await sendPaymentLink(lead, paymentModal, sendMethod);
+                  setSendingPayment(false);
+                  setPaymentModal(null);
+                }}
+                style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Send size={14} /> {sendingPayment ? 'Sending...' : 'Send'}
+              </button>
+              <button className="btn-ghost" onClick={() => setPaymentModal(null)} style={{ fontSize: '13px' }}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         {/* GHL Messaging */}
         <GHLMessaging lead={lead} />
