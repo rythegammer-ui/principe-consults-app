@@ -4,6 +4,7 @@ import { MessageSquare } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { Avatar } from '../ui';
 import { formatPhone, relativeTime, formatCurrency } from '../../utils/formatters';
+import { calculateLeadScore, getScoreColor } from '../../lib/leadScoring';
 
 export default function KanbanCard({ lead, index, onClick }) {
   const users = useAppStore(s => s.users);
@@ -55,8 +56,23 @@ export default function KanbanCard({ lead, index, onClick }) {
             boxShadow: snapshot.isDragging ? '0 4px 20px rgba(0,0,0,0.5)' : 'none',
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: '14px', fontFamily: "'Syne', sans-serif", marginBottom: '4px' }}>
-            {lead.businessName}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <div style={{ fontWeight: 600, fontSize: '14px', fontFamily: "'Syne', sans-serif" }}>
+              {lead.businessName}
+            </div>
+            {(() => {
+              const score = calculateLeadScore(lead);
+              const sc = getScoreColor(score);
+              return (
+                <span style={{
+                  fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px',
+                  background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {score}
+                </span>
+              );
+            })()}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '6px' }}>
             {lead.type} — {lead.city}

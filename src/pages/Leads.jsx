@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Upload, Download, Search } from 'lucide-react';
+import { Plus, Upload, Download, Search, Flame } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import LeadTable from '../components/leads/LeadTable';
 import AddLeadModal from '../components/leads/AddLeadModal';
@@ -7,6 +7,7 @@ import ImportCSVModal from '../components/leads/ImportCSVModal';
 import { EmptyState } from '../components/ui';
 import { canSeeAllLeads } from '../utils/permissions';
 import { LEAD_STATUSES, BUSINESS_TYPES, DFW_CITIES } from '../utils/formatters';
+import { calculateLeadScore } from '../lib/leadScoring';
 import { exportLeadsCSV, downloadCSV } from '../utils/csv';
 import { useIsMobile } from '../utils/hooks';
 
@@ -21,7 +22,8 @@ export default function Leads() {
   const [filterType, setFilterType] = useState('');
   const [filterCity, setFilterCity] = useState('');
   const [filterAssigned, setFilterAssigned] = useState('');
-  const [sortBy, setSortBy] = useState('name');
+  const [sortBy, setSortBy] = useState('score');
+  const [hotOnly, setHotOnly] = useState(false);
   const isMobile = useIsMobile();
 
   const visibleLeads = useMemo(() => {
@@ -40,9 +42,11 @@ export default function Leads() {
     if (filterType) filtered = filtered.filter(l => l.type === filterType);
     if (filterCity) filtered = filtered.filter(l => l.city === filterCity);
     if (filterAssigned) filtered = filtered.filter(l => l.assignedTo === filterAssigned);
+    if (hotOnly) filtered = filtered.filter(l => calculateLeadScore(l) >= 70);
 
     filtered.sort((a, b) => {
       switch (sortBy) {
+        case 'score': return calculateLeadScore(b) - calculateLeadScore(a);
         case 'name': return (a.businessName || '').localeCompare(b.businessName || '');
         case 'date': return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         case 'rating': return (b.rating || 0) - (a.rating || 0);
@@ -91,11 +95,20 @@ export default function Leads() {
             </select>
 
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ width: 'auto', height: '38px', padding: '0 12px' }}>
+              <option value="score">Sort: Score</option>
               <option value="name">Sort: Name</option>
               <option value="date">Sort: Date Added</option>
               <option value="rating">Sort: Rating</option>
               <option value="status">Sort: Status</option>
             </select>
+
+            <button
+              onClick={() => setHotOnly(!hotOnly)}
+              className={hotOnly ? 'btn-red' : 'btn-ghost'}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px', padding: '0 14px' }}
+            >
+              <Flame size={14} /> Hot Leads
+            </button>
           </>
         )}
 
@@ -106,6 +119,7 @@ export default function Leads() {
               {LEAD_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ flex: 1, height: '38px', padding: '0 8px', fontSize: '12px' }}>
+              <option value="score">Score</option>
               <option value="name">Name</option>
               <option value="date">Date</option>
               <option value="rating">Rating</option>

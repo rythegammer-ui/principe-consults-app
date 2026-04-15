@@ -3,6 +3,7 @@ import { Check, X, MoreVertical, Copy, Trash2, Edit2, Eye } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { StatusBadge, Avatar, StarRating } from '../ui';
 import { formatPhone, relativeTime } from '../../utils/formatters';
+import { calculateLeadScore, getScoreColor } from '../../lib/leadScoring';
 import LeadDetailPanel from './LeadDetailPanel';
 
 export default function LeadTable({ leads }) {
@@ -70,6 +71,7 @@ export default function LeadTable({ leads }) {
               <th style={{ width: '40px' }}>
                 <input type="checkbox" checked={selectedIds.size === leads.length && leads.length > 0} onChange={toggleAll} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
               </th>
+              <th>Score</th>
               <th>Business</th>
               <th>Type</th>
               <th>City</th>
@@ -85,10 +87,22 @@ export default function LeadTable({ leads }) {
           <tbody>
             {leads.map(lead => {
               const assigned = users.find(u => u.id === lead.assignedTo);
+              const score = calculateLeadScore(lead);
+              const scoreStyle = getScoreColor(score);
               return (
                 <tr key={lead.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedLead(lead.id)}>
                   <td onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={selectedIds.has(lead.id)} onChange={() => toggleSelect(lead.id)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: '36px', padding: '3px 6px', borderRadius: '6px', fontSize: '12px', fontWeight: 700,
+                      background: scoreStyle.bg, color: scoreStyle.text, border: `1px solid ${scoreStyle.border}`,
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      {score}
+                    </span>
                   </td>
                   <td>
                     <span style={{ fontWeight: 600, fontSize: '14px' }}>{lead.businessName}</span>
