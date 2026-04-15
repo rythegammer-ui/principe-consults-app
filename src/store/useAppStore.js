@@ -14,29 +14,47 @@ import {
 
 // ── Default settings for new accounts ───────────────────────
 const DEFAULT_SETTINGS = {
+  // Agency
   agencyName: 'Principe Consults',
   ownerName: '',
   defaultCity: 'DFW',
   agencyPhone: '',
   agencyEmail: '',
+  // Packages & Deals
   avgDealLaunchpad: 997,
   avgDealGrowth: 2500,
   avgDealFullStack: 5000,
   retainerGrowth: 500,
   retainerFullStack: 1000,
+  // Stripe Payment Links
+  stripeLaunchpadUrl: '',
+  stripeGrowthUrl: '',
+  stripeFullStackUrl: '',
+  stripeSecretKey: '',
+  stripeWebhookSecret: '',
+  // Communications
   bookingLink: '',
   calendarName: '',
+  clientIntakeFormUrl: '',
+  digestEmailRecipients: '',
+  sendgridApiKey: '',
+  // Integrations
   anthropicApiKey: '',
-  stripeSecretKey: '',
-  stripePaymentLinkBase: '',
   ghlApiKey: '',
   ghlLocationId: '',
   ghlWorkflows: '',
+  // Commissions
   commissionDemo: 50,
   commissionLaunchpad: 150,
   commissionGrowth: 300,
   commissionFullStack: 500,
   commissionRetainerPct: 15,
+  // Automation Thresholds
+  staleDays: 7,
+  coldDays: 14,
+  overdueHours: 72,
+  hotScoreCutoff: 70,
+  warmScoreCutoff: 40,
 };
 
 let idCounter = Date.now();
@@ -78,6 +96,7 @@ const useAppStore = create(
       firebaseUnsubscribers: [],
 
       // ── Data (starts empty, loaded from Firebase) ───────────
+      appNotifications: [],
       users: [],
       leads: [],
       callLogs: [],
