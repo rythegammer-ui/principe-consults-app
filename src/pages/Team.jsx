@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
-import { Plus, BarChart3, Activity } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Plus, BarChart3, Activity, Copy, Check } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import useAppStore from '../store/useAppStore';
-import { Modal, Avatar, RoleBadge, EmptyState, StatusBadge } from '../components/ui';
+import { Modal, Avatar, RoleBadge, StatusBadge } from '../components/ui';
 import { formatCurrency } from '../utils/formatters';
 import { startOfWeek, addDays, isWithinInterval, format } from 'date-fns';
 
@@ -15,17 +15,31 @@ export default function Team() {
   const settings = useAppStore(s => s.settings);
   const activityLog = useAppStore(s => s.activityLog);
   const addNotification = useAppStore(s => s.addNotification);
+  const getInviteCode = useAppStore(s => s.getInviteCode);
   const [showAdd, setShowAdd] = useState(false);
   const [showPerf, setShowPerf] = useState(null);
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'rep', password: '', notes: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'rep', notes: '' });
+  const [inviteCode, setInviteCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
 
-  const handleAdd = (e) => {
+  useEffect(() => {
+    getInviteCode().then(code => { if (code) setInviteCode(code); });
+  }, [getInviteCode]);
+
+  const handleAdd = async (e) => {
     e.preventDefault();
-    if (!newUser.name || !newUser.email || !newUser.password) return;
-    addUser({ ...newUser, avatar: newUser.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() });
-    addNotification(`Team member "${newUser.name}" added`, 'success');
-    setNewUser({ name: '', email: '', role: 'rep', password: '', notes: '' });
+    if (!newUser.name || !newUser.email) return;
+    const created = await addUser({ ...newUser, avatar: newUser.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() });
+    if (created) addNotification(`Seat created for "${newUser.name}". Share the invite code below so they can sign up.`, 'success');
+    setNewUser({ name: '', email: '', role: 'rep', notes: '' });
     setShowAdd(false);
+  };
+
+  const copyInviteCode = () => {
+    if (!inviteCode) return;
+    navigator.clipboard.writeText(inviteCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   };
 
   const teamData = useMemo(() => {
@@ -82,11 +96,33 @@ export default function Team() {
 
   return (
     <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <button className="btn-red" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Plus size={14} /> Add Team Member
-        </button>
-      </div>
+      {inviteCode && (
+        <div className="card" style={{ padding: '14px 18px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+              Invite Code — share with new reps
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace", wordBreak: 'break-all' }}>
+              {inviteCode}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-ghost" onClick={copyInviteCode} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {codeCopied ? <><Check size={14} style={{ color: 'var(--green)' }} /> Copied</> : <><Copy size={14} /> Copy Code</>}
+            </button>
+            <button className="btn-red" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Plus size={14} /> Add Team Member
+            </button>
+          </div>
+        </div>
+      )}
+      {!inviteCode && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+          <button className="btn-red" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={14} /> Add Team Member
+          </button>
+        </div>
+      )}
 
       {/* Team Table */}
       <div className="card" style={{ padding: '4px', marginBottom: '24px' }}>
@@ -110,7 +146,14 @@ export default function Team() {
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <Avatar name={u.name} size={32} />
-                    <span style={{ fontWeight: 600 }}>{u.name}</span>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{u.name}</div>
+                      {u.pendingSignup && (
+                        <div style={{ fontSize: '11px', color: 'var(--yellow)', marginTop: '2px' }}>
+                          Pending signup — hasn't joined yet
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td>
@@ -154,6 +197,10 @@ export default function Team() {
 
       {/* Add User Modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Team Member">
+        <div style={{ background: 'var(--surface2)', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: 'var(--text2)', lineHeight: '1.5' }}>
+          This reserves a seat in your agency. The rep sets their own password when
+          they sign up with your invite code — <strong>{inviteCode || 'loading...'}</strong>.
+        </div>
         <form onSubmit={handleAdd}>
           <div style={fieldStyle}>
             <label style={labelStyle}>Full Name *</label>
@@ -171,16 +218,12 @@ export default function Team() {
             </select>
           </div>
           <div style={fieldStyle}>
-            <label style={labelStyle}>Temporary Password *</label>
-            <input type="text" value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} required placeholder="temp1234" />
-          </div>
-          <div style={fieldStyle}>
             <label style={labelStyle}>Notes</label>
             <textarea rows={2} value={newUser.notes} onChange={e => setNewUser(u => ({ ...u, notes: e.target.value }))} placeholder="Any notes..." />
           </div>
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
             <button type="button" className="btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button>
-            <button type="submit" className="btn-red">Add Member</button>
+            <button type="submit" className="btn-red">Create Seat</button>
           </div>
         </form>
       </Modal>

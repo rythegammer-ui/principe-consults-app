@@ -17,6 +17,7 @@ export default function Dashboard() {
   const payments = useAppStore(s => s.payments);
   const activityLog = useAppStore(s => s.activityLog);
   const users = useAppStore(s => s.users);
+  const settings = useAppStore(s => s.settings);
   const updateLead = useAppStore(s => s.updateLead);
   const addActivity = useAppStore(s => s.addActivity);
 
@@ -63,14 +64,16 @@ export default function Dashboard() {
 
   const leaderboard = useMemo(() => {
     if (!canAccess(currentUser?.role, 'Team')) return [];
+    const demoPay = settings.commissionDemo || 50;
+    const closePay = settings.commissionGrowth || 300;
     return users.filter(u => u.role !== 'admin').map(u => {
       const userCalls = callLogs.filter(c => c.calledBy === u.name);
       const userLeads = leads.filter(l => l.assignedTo === u.id);
       const demos = userLeads.filter(l => ['Demo Scheduled', 'Demo Completed', 'Proposal Sent', 'Closed Won'].includes(l.status)).length;
       const closed = userLeads.filter(l => l.status === 'Closed Won').length;
-      return { ...u, calls: userCalls.length, demos, closed, commission: demos * 50 + closed * 200 };
+      return { ...u, calls: userCalls.length, demos, closed, commission: demos * demoPay + closed * closePay };
     }).sort((a, b) => b.demos - a.demos);
-  }, [users, callLogs, leads, currentUser]);
+  }, [users, callLogs, leads, currentUser, settings]);
 
   const handleTaskComplete = (lead) => {
     updateLead(lead.id, { status: lead.status === 'New' ? 'Contacted' : lead.status, followUpDate: null });

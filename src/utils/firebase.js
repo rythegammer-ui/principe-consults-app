@@ -6,6 +6,8 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
+  deleteUser as firebaseDeleteUser,
 } from 'firebase/auth';
 import { FIREBASE_CONFIG } from '../config/firebase.config';
 
@@ -66,6 +68,17 @@ export async function signOut() {
   await firebaseSignOut(auth);
 }
 
+export async function sendPasswordResetEmail(email) {
+  ensureInit();
+  if (!auth) throw new Error('Firebase not configured');
+  await firebaseSendPasswordResetEmail(auth, email);
+}
+
+export async function deleteCurrentAuthUser() {
+  if (!auth?.currentUser) return;
+  try { await firebaseDeleteUser(auth.currentUser); } catch { /* ignore */ }
+}
+
 export function onAuthChanged(callback) {
   ensureInit();
   if (!auth) {
@@ -84,6 +97,14 @@ export async function saveToFirebase(path, data) {
   } catch (err) {
     console.error(`Firebase save failed (${path}):`, err);
   }
+}
+
+// Throwing variant for critical writes (auth flows, onboarding) where we must
+// know whether the write actually landed.
+export async function saveToFirebaseStrict(path, data) {
+  ensureInit();
+  if (!db) throw new Error('Firebase not configured');
+  await set(ref(db, path), data);
 }
 
 export async function loadFromFirebase(path) {

@@ -32,7 +32,6 @@ export default function Signup() {
   const navigate = useNavigate();
 
   const [mode, setMode] = useState(null); // null = choose, 'rep' = join agency, 'admin' = create agency
-  const [step, setStep] = useState(1);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -235,7 +234,7 @@ export default function Signup() {
               </button>
 
               <button
-                onClick={() => { setMode('admin'); setStep(1); }}
+                onClick={() => setMode('admin')}
                 className="card"
                 style={{
                   padding: '28px', cursor: 'pointer', textAlign: 'center',

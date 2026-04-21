@@ -199,10 +199,11 @@ if (typeof document !== 'undefined' && !document.querySelector('#spinner-keyfram
   document.head.appendChild(style);
 }
 
-export function EmptyState({ icon: Icon = Inbox, message = 'Nothing here yet.', action, onAction }) {
+export function EmptyState({ icon, message = 'Nothing here yet.', action, onAction }) {
+  const IconComp = icon || Inbox;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
-      <Icon size={48} style={{ marginBottom: '16px', opacity: 0.5 }} />
+      <IconComp size={48} style={{ marginBottom: '16px', opacity: 0.5 }} />
       <p style={{ fontSize: '15px', marginBottom: action ? '16px' : 0 }}>{message}</p>
       {action && <button className="btn-red" onClick={onAction}>{action}</button>}
     </div>

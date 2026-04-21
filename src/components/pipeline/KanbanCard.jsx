@@ -3,7 +3,7 @@ import { Draggable } from '@hello-pangea/dnd';
 import { MessageSquare } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { Avatar } from '../ui';
-import { formatPhone, relativeTime, formatCurrency } from '../../utils/formatters';
+import { formatPhone, formatCurrency } from '../../utils/formatters';
 import { calculateLeadScore, getScoreColor } from '../../lib/leadScoring';
 
 export default function KanbanCard({ lead, index, onClick }) {
@@ -32,9 +32,13 @@ export default function KanbanCard({ lead, index, onClick }) {
     } catch { /* noop */ }
   };
 
-  const daysInStage = lead.createdAt
-    ? Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / (1000 * 60 * 60 * 24))
-    : 0;
+  // Snapshot once per mount. The value only changes once per day, so
+  // recomputing on every render is unnecessary (and React 19 flags Date.now()
+  // as impure during render).
+  const [daysInStage] = useState(() => {
+    if (!lead.createdAt) return 0;
+    return Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+  });
 
   return (
     <Draggable draggableId={lead.id} index={index}>

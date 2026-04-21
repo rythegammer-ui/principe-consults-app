@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   saveToFirebase,
+  saveToFirebaseStrict,
   loadFromFirebase,
   subscribeToFirebase,
   createAccount,
@@ -10,7 +11,10 @@ import {
   onAuthChanged,
   encodeEmail,
   isFirebaseConfigured,
+  deleteCurrentAuthUser,
 } from '../utils/firebase';
+
+const normalizeEmail = (email) => (email || '').trim().toLowerCase();
 
 // ── Default settings for new accounts ───────────────────────
 const DEFAULT_SETTINGS = {
@@ -116,10 +120,19 @@ const useAppStore = create(
           if (firebaseUser) {
             const uid = firebaseUser.uid;
 
-            // Look up which account this user belongs to
-            const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(firebaseUser.email)}`);
-            const accountId = emailData?.accountId || uid;
-            const userId = emailData?.userId || 'owner';
+            // Primary lookup: userAccounts/{uid} (secured per-user).
+            // Fallback to emailIndex for pre-existing accounts.
+            let userAccount = await loadFromFirebase(`userAccounts/${uid}`);
+            if (!userAccount && firebaseUser.email) {
+              const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(firebaseUser.email)}`);
+              if (emailData) {
+                userAccount = emailData;
+                // Backfill userAccounts so future reads are fast and rules pass.
+                await saveToFirebase(`userAccounts/${uid}`, emailData);
+              }
+            }
+            const accountId = userAccount?.accountId || uid;
+            const userId = userAccount?.userId || 'owner';
 
             set({ accountId });
 
@@ -146,8 +159,9 @@ const useAppStore = create(
               set({ authLoading: false });
             }
           } else {
-            // Signed out — clear everything
+            // Signed out — clear everything in memory AND localStorage
             get()._disconnectAccount();
+            try { localStorage.removeItem('principe-console-storage'); } catch { /* ignore */ }
             set({
               accountId: null,
               currentUser: null,
@@ -159,22 +173,33 @@ const useAppStore = create(
               payments: [],
               payoutRequests: [],
               activityLog: [],
+              appNotifications: [],
               settings: DEFAULT_SETTINGS,
               onboardingComplete: true,
             });
           }
         });
+
+        // Cross-tab logout sync
+        try {
+          window.addEventListener('storage', (e) => {
+            if (e.key === 'principe-console-logout' && e.newValue) {
+              get().logout();
+            }
+          });
+        } catch { /* SSR */ }
       },
 
       // ── Auth: Signup as ADMIN (creates a new agency account) ──
       signup: async (name, email, password, agencyName) => {
-        const firebaseUser = await createAccount(email, password);
+        const normalizedEmail = normalizeEmail(email);
+        const firebaseUser = await createAccount(normalizedEmail, password);
         const accountId = firebaseUser.uid;
 
         const ownerUser = {
           id: 'owner',
           name,
-          email,
+          email: normalizedEmail,
           role: 'admin',
           avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
           active: true,
@@ -184,34 +209,35 @@ const useAppStore = create(
           ...DEFAULT_SETTINGS,
           agencyName: agencyName || 'Principe Consults',
           ownerName: name,
-          agencyEmail: email,
+          agencyEmail: normalizedEmail,
         };
 
         // Create account profile
         const profile = {
           ownerName: name,
-          email,
+          email: normalizedEmail,
           agencyName: agencyName || 'Principe Consults',
           createdAt: new Date().toISOString(),
           onboardingComplete: false,
         };
 
-        // Write all initial data to Firebase
-        await saveToFirebase(`accounts/${accountId}/profile`, profile);
-        await saveToFirebase(`accounts/${accountId}/users`, [ownerUser]);
+        // Write userAccounts FIRST so security rules let us write the rest.
+        const userAccountEntry = { accountId, userId: 'owner', role: 'admin' };
+        await saveToFirebaseStrict(`userAccounts/${accountId}`, userAccountEntry);
+
+        // Critical: these must actually land or the account is unusable.
+        await saveToFirebaseStrict(`accounts/${accountId}/profile`, profile);
+        await saveToFirebaseStrict(`accounts/${accountId}/users`, [ownerUser]);
+        await saveToFirebaseStrict(`accounts/${accountId}/settings`, initialSettings);
+        // Non-critical initialisations — empty arrays can be auto-created later.
         await saveToFirebase(`accounts/${accountId}/leads`, []);
         await saveToFirebase(`accounts/${accountId}/callLogs`, []);
         await saveToFirebase(`accounts/${accountId}/payments`, []);
         await saveToFirebase(`accounts/${accountId}/payoutRequests`, []);
         await saveToFirebase(`accounts/${accountId}/activityLog`, []);
-        await saveToFirebase(`accounts/${accountId}/settings`, initialSettings);
 
-        // Create email index
-        await saveToFirebase(`emailIndex/${encodeEmail(email)}`, {
-          accountId,
-          userId: 'owner',
-          role: 'admin',
-        });
+        // Create email index (readable by all authed users, for invite lookup + login)
+        await saveToFirebaseStrict(`emailIndex/${encodeEmail(normalizedEmail)}`, userAccountEntry);
 
         set({
           accountId,
@@ -232,41 +258,55 @@ const useAppStore = create(
 
       // ── Auth: Signup as REP (join existing agency with invite code) ──
       joinAgency: async (name, email, password, inviteCode) => {
-        const accountId = inviteCode.trim();
+        const accountId = (inviteCode || '').trim();
+        const normalizedEmail = normalizeEmail(email);
+
+        if (!accountId) {
+          throw { code: 'invalid-invite', message: 'Invite code is required.' };
+        }
 
         // Create Firebase Auth account FIRST so we're authenticated
         // (Firebase rules require auth for reads)
-        const firebaseUser = await createAccount(email, password);
+        const firebaseUser = await createAccount(normalizedEmail, password);
 
         // Now verify the invite code (account ID) is valid
         const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
         if (!profile) {
-          // Invalid code — sign out the newly created auth account
-          try { await signOut(); } catch (e) { /* ignore */ }
+          // Invalid code — clean up the newly created auth account so the email isn't orphaned
+          try { await deleteCurrentAuthUser(); } catch { /* ignore */ }
+          try { await signOut(); } catch { /* ignore */ }
           throw { code: 'invalid-invite', message: 'Invalid invite code. Ask your admin for the correct code.' };
         }
 
-        const newUser = {
-          id: genId('U'),
-          name,
-          email,
-          role: 'rep',
-          avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-          active: true,
-        };
-
-        // Add rep to the account's users list
+        // If admin pre-created a seat for this email, reuse the existing userId
         const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
         const userList = normalizeData(usersData) || [];
-        userList.push(newUser);
-        await saveToFirebase(`accounts/${accountId}/users`, userList);
+        const existingSeat = userList.find(u => normalizeEmail(u.email) === normalizedEmail);
+        const userId = existingSeat?.id || genId('U');
+
+        const newUser = {
+          id: userId,
+          name,
+          email: normalizedEmail,
+          role: existingSeat?.role || 'rep',
+          avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
+          active: true,
+          pendingSignup: false,
+        };
+
+        // Write userAccounts FIRST — security rules need this to allow the
+        // subsequent write to accounts/{accountId}/users.
+        const userAccountEntry = { accountId, userId: newUser.id, role: newUser.role };
+        await saveToFirebaseStrict(`userAccounts/${firebaseUser.uid}`, userAccountEntry);
+
+        // Replace seat if present, else append
+        const nextUsers = existingSeat
+          ? userList.map(u => u.id === userId ? { ...u, ...newUser } : u)
+          : [...userList, newUser];
+        await saveToFirebaseStrict(`accounts/${accountId}/users`, nextUsers);
 
         // Create email index pointing to this account
-        await saveToFirebase(`emailIndex/${encodeEmail(email)}`, {
-          accountId,
-          userId: newUser.id,
-          role: 'rep',
-        });
+        await saveToFirebaseStrict(`emailIndex/${encodeEmail(normalizedEmail)}`, userAccountEntry);
 
         set({
           accountId,
@@ -281,14 +321,22 @@ const useAppStore = create(
       // ── Auth: Login ─────────────────────────────────────────
       login: async (email, password) => {
         try {
+          const normalizedEmail = normalizeEmail(email);
           // Firebase Auth sign-in (works for both owners and reps)
-          const firebaseUser = await signIn(email, password);
+          const firebaseUser = await signIn(normalizedEmail, password);
 
-          // Look up which account this user belongs to
-          const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(email)}`);
-          if (!emailData) return false;
+          // Primary lookup: userAccounts/{uid} (scoped by rules). Fallback: emailIndex.
+          let userAccount = await loadFromFirebase(`userAccounts/${firebaseUser.uid}`);
+          if (!userAccount) {
+            userAccount = await loadFromFirebase(`emailIndex/${encodeEmail(normalizedEmail)}`);
+            if (userAccount) {
+              // Backfill for future rule-based reads
+              await saveToFirebase(`userAccounts/${firebaseUser.uid}`, userAccount);
+            }
+          }
+          if (!userAccount) return false;
 
-          const { accountId, userId } = emailData;
+          const { accountId, userId } = userAccount;
 
           // Load the user's info from the account
           const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
@@ -314,7 +362,7 @@ const useAppStore = create(
       // ── Auth: Logout ────────────────────────────────────────
       logout: async () => {
         get()._disconnectAccount();
-        try { await signOut(); } catch (e) { /* ignore */ }
+        try { await signOut(); } catch { /* ignore */ }
         set({
           accountId: null,
           currentUser: null,
@@ -326,9 +374,14 @@ const useAppStore = create(
           payments: [],
           payoutRequests: [],
           activityLog: [],
+          appNotifications: [],
           settings: DEFAULT_SETTINGS,
           onboardingComplete: true,
         });
+        // Wipe persisted cache so cross-user sessions can't see stale data.
+        try { localStorage.removeItem('principe-console-storage'); } catch { /* ignore */ }
+        // Signal other tabs to log out too.
+        try { localStorage.setItem('principe-console-logout', String(Date.now())); } catch { /* ignore */ }
       },
 
       // ── Internal: Connect to account's real-time data ──────
@@ -365,6 +418,12 @@ const useAppStore = create(
         return get().accountId || null;
       },
 
+      // ── Password reset (sends email via Firebase Auth) ──
+      requestPasswordReset: async (email) => {
+        const { sendPasswordResetEmail } = await import('../utils/firebase');
+        await sendPasswordResetEmail(normalizeEmail(email));
+      },
+
       // ── Onboarding (admin only) ────────────────────────────
       completeOnboarding: async (settingsPatch) => {
         const accountId = get().accountId;
@@ -382,7 +441,6 @@ const useAppStore = create(
       },
 
       // ── Leads ──────────────────────────────────────────────
-      leads: [],
       addLead: (lead) => {
         const newLead = { ...lead, id: genId('L'), createdAt: new Date().toISOString(), outreachMessages: [], outreachStage: null };
         set(s => ({ leads: [...s.leads, newLead] }));
@@ -408,7 +466,6 @@ const useAppStore = create(
       },
 
       // ── Calls ──────────────────────────────────────────────
-      callLogs: [],
       logCall: (callLog) => {
         const newLog = { ...callLog, id: genId('CL'), timestamp: new Date().toISOString() };
         set(s => ({ callLogs: [...s.callLogs, newLog] }));
@@ -433,13 +490,12 @@ const useAppStore = create(
             import('../lib/pipelineTriggers').then(({ onStageChange }) => {
               onStageChange({ ...lead, status: newStatus }, oldStatus, newStatus);
             });
-          } catch (e) { /* non-blocking */ }
+          } catch { /* non-blocking */ }
         }
         get()._syncKey('leads');
       },
 
       // ── Payments ───────────────────────────────────────────
-      payments: [],
       addPayment: (payment) => {
         const newPayment = { ...payment, id: genId('PAY') };
         set(s => ({ payments: [...s.payments, newPayment] }));
@@ -457,7 +513,6 @@ const useAppStore = create(
       },
 
       // ── Payout Requests ────────────────────────────────────
-      payoutRequests: [],
       requestPayout: (amount, method, notes) => {
         const user = get().currentUser;
         const request = {
@@ -509,7 +564,6 @@ const useAppStore = create(
       },
 
       // ── Activity Log ───────────────────────────────────────
-      activityLog: [],
       addActivity: (description, type, userId, leadId = null) => {
         set(s => {
           const newLog = [...s.activityLog, { id: genId('ACT'), description, type, userId, leadId, timestamp: new Date().toISOString() }];
@@ -532,7 +586,6 @@ const useAppStore = create(
       },
 
       // ── Settings ───────────────────────────────────────────
-      settings: DEFAULT_SETTINGS,
       updateSettings: (patch) => {
         set(s => ({ settings: { ...s.settings, ...patch } }));
         get().addNotification('Settings saved.', 'success');
@@ -544,22 +597,24 @@ const useAppStore = create(
       },
 
       // ── Team ───────────────────────────────────────────────
+      // Pre-creates a seat for a rep. The rep completes signup themselves using
+      // the agency invite code — their Firebase Auth account is created at that
+      // point, and joinAgency will merge into this pre-created seat.
       addUser: async (user) => {
-        const newUser = { ...user, id: genId('U'), active: true };
-        set(s => ({ users: [...s.users, newUser] }));
-        get().addActivity(`Team member "${user.name}" added`, 'team', get().currentUser?.id);
-        get()._syncKey('users');
-
-        // Add to email index so they can log in
-        if (user.email) {
-          const accountId = get().accountId;
-          await saveToFirebase(`emailIndex/${encodeEmail(user.email)}`, {
-            accountId,
-            userId: newUser.id,
-            role: newUser.role || 'rep',
-          });
+        const normalizedEmail = normalizeEmail(user.email);
+        // Prevent duplicate seats for the same email within this account.
+        const existing = get().users.find(u => normalizeEmail(u.email) === normalizedEmail);
+        if (existing) {
+          get().addNotification('A team member with that email already exists.', 'error');
+          return existing;
         }
-
+        // Don't persist any password — reps set their own at signup.
+        const rest = { ...user };
+        delete rest.password;
+        const newUser = { ...rest, email: normalizedEmail, id: genId('U'), active: true, pendingSignup: true };
+        set(s => ({ users: [...s.users, newUser] }));
+        get().addActivity(`Team seat created for "${user.name}" — share the invite code`, 'team', get().currentUser?.id);
+        get()._syncKey('users');
         return newUser;
       },
       updateUser: (id, patch) => {

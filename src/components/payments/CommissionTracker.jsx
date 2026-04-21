@@ -4,7 +4,6 @@ import { formatCurrency } from '../../utils/formatters';
 export default function CommissionTracker() {
   const users = useAppStore(s => s.users);
   const leads = useAppStore(s => s.leads);
-  const callLogs = useAppStore(s => s.callLogs);
   const payments = useAppStore(s => s.payments);
   const settings = useAppStore(s => s.settings);
 

@@ -198,7 +198,6 @@ function AdminPayoutActions({ request }) {
 
 export default function Payouts() {
   const currentUser = useAppStore(s => s.currentUser);
-  const users = useAppStore(s => s.users);
   const leads = useAppStore(s => s.leads);
   const payments = useAppStore(s => s.payments);
   const payoutRequests = useAppStore(s => s.payoutRequests);

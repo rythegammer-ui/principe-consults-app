@@ -59,7 +59,7 @@ export default function CallTracker() {
         if (a.lastCall && b.lastCall) return new Date(b.lastCall.timestamp) - new Date(a.lastCall.timestamp);
         return 0;
       });
-  }, [leads, callLogs]);
+  }, [leads, myCallLogs]);
 
   const handleExport = () => {
     const csv = exportCallsCSV(callLogs, leads);

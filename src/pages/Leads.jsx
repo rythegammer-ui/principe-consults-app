@@ -58,7 +58,7 @@ export default function Leads() {
     });
 
     return filtered;
-  }, [leads, search, filterStatus, filterType, filterCity, filterAssigned, sortBy, currentUser]);
+  }, [leads, search, filterStatus, filterType, filterCity, filterAssigned, sortBy, hotOnly, currentUser]);
 
   const handleExport = () => {
     const csv = exportLeadsCSV(visibleLeads);

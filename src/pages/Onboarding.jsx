@@ -12,7 +12,6 @@ import { ONBOARDING_BOOKING_LINK } from '../config/firebase.config';
 function AdminOnboarding() {
   const navigate = useNavigate();
   const settings = useAppStore(s => s.settings);
-  const currentUser = useAppStore(s => s.currentUser);
   const completeOnboarding = useAppStore(s => s.completeOnboarding);
 
   const [step, setStep] = useState(0);
@@ -118,7 +117,7 @@ function AdminOnboarding() {
   return (
     <>
       {/* Step Indicator */}
-      <StepIndicator total={3} current={step} labels={['Agency Setup', 'Book Call', 'Launch']} />
+      <StepIndicator total={3} current={step} />
       <div style={{ width: '100%', maxWidth: '500px', animation: 'fadeIn 0.3s ease-out' }}>
         {steps[step]}
       </div>
@@ -188,12 +187,15 @@ function RepOnboarding() {
           { icon: Target, label: 'Find Leads', color: 'var(--blue)' },
           { icon: PhoneCall, label: 'Book Demos', color: 'var(--purple)' },
           { icon: DollarSign, label: 'Get Paid', color: 'var(--green)' },
-        ].map(({ icon: Icon, label, color }) => (
-          <div key={label} style={{ textAlign: 'center', padding: '16px 8px', background: 'var(--surface2)', borderRadius: '8px' }}>
-            <Icon size={24} style={{ color, marginBottom: '6px' }} />
-            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text2)' }}>{label}</div>
-          </div>
-        ))}
+        ].map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} style={{ textAlign: 'center', padding: '16px 8px', background: 'var(--surface2)', borderRadius: '8px' }}>
+              <Icon size={24} style={{ color: item.color, marginBottom: '6px' }} />
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text2)' }}>{item.label}</div>
+            </div>
+          );
+        })}
       </div>
 
       {navButtons(true)}
@@ -449,11 +451,9 @@ function RepOnboarding() {
     </div>,
   ];
 
-  const stepLabels = ['Welcome', 'Packages', 'Your Tools', 'Daily Flow', 'Pay', 'Tips', 'Start'];
-
   return (
     <>
-      <StepIndicator total={steps.length} current={step} labels={stepLabels} />
+      <StepIndicator total={steps.length} current={step} />
       <div style={{ width: '100%', maxWidth: '560px', animation: 'fadeIn 0.3s ease-out' }}>
         {steps[step]}
       </div>
@@ -462,7 +462,7 @@ function RepOnboarding() {
 }
 
 // ── Shared Step Indicator ───────────────────────────────────
-function StepIndicator({ total, current, labels }) {
+function StepIndicator({ total, current }) {
   return (
     <div style={{ display: 'flex', gap: '4px', marginBottom: '32px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
       {Array.from({ length: total }).map((_, i) => (

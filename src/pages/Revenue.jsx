@@ -9,7 +9,6 @@ import StripeSync from '../components/payments/StripeSync';
 import CommissionTracker from '../components/payments/CommissionTracker';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { getPaymentStatus } from '../lib/paymentLinks';
-import { calculateLeadScore } from '../lib/leadScoring';
 import { useIsMobile } from '../utils/hooks';
 import { downloadCSV } from '../utils/csv';
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
@@ -19,8 +18,6 @@ const TIER_COLORS = { Launchpad: '#e63228', 'Growth Engine': '#60a5fa', 'Full St
 export default function Revenue() {
   const payments = useAppStore(s => s.payments);
   const leads = useAppStore(s => s.leads);
-  const settings = useAppStore(s => s.settings);
-  const currentUser = useAppStore(s => s.currentUser);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [revenueTab, setRevenueTab] = useState('overview');
   const isMobile = useIsMobile();

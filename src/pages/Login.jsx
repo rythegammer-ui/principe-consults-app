@@ -5,16 +5,20 @@ import useAppStore from '../store/useAppStore';
 
 export default function Login() {
   const login = useAppStore(s => s.login);
+  const requestPasswordReset = useAppStore(s => s.requestPasswordReset);
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setLoading(true);
 
     try {
@@ -34,6 +38,29 @@ export default function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgot = async () => {
+    setError('');
+    setInfo('');
+    if (!email) {
+      setError('Enter your email above, then click "Forgot password".');
+      return;
+    }
+    setSendingReset(true);
+    try {
+      await requestPasswordReset(email);
+      setInfo('Password reset email sent. Check your inbox.');
+    } catch (err) {
+      if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-email') {
+        // Don't leak which emails exist — show the same success message.
+        setInfo('If an account exists for that email, a reset link was sent.');
+      } else {
+        setError('Could not send reset email. Try again in a minute.');
+      }
+    } finally {
+      setSendingReset(false);
     }
   };
 
@@ -116,6 +143,12 @@ export default function Login() {
             </div>
           )}
 
+          {info && (
+            <div style={{ color: 'var(--green)', fontSize: '13px', marginBottom: '16px', textAlign: 'center' }}>
+              {info}
+            </div>
+          )}
+
           <button
             type="submit"
             className="btn-red"
@@ -124,6 +157,17 @@ export default function Login() {
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
+
+          <div style={{ textAlign: 'center', marginTop: '12px' }}>
+            <button
+              type="button"
+              onClick={handleForgot}
+              disabled={sendingReset}
+              style={{ background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' }}
+            >
+              {sendingReset ? 'Sending reset email...' : 'Forgot password?'}
+            </button>
+          </div>
         </form>
 
         <div style={{ textAlign: 'center', marginTop: '24px' }}>

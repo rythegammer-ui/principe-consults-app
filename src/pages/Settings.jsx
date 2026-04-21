@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Eye, EyeOff, Cloud, Upload, Download, Copy, Check, Users, Settings2, CreditCard, Zap, Bell } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import { ConfirmDialog } from '../components/ui';
@@ -9,6 +9,28 @@ const TABS = [
   { id: 'packages', label: 'Packages', icon: CreditCard },
   { id: 'automation', label: 'Automation', icon: Bell },
 ];
+
+// Declared outside the component so React preserves input identity between renders.
+function SecretField({ label, field, placeholder, form, onSet, showKeys, onToggleKey, labelStyle, fieldStyle }) {
+  return (
+    <div style={fieldStyle}>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={showKeys[field] ? 'text' : 'password'}
+          value={form[field] || ''}
+          onChange={e => onSet(field, e.target.value)}
+          placeholder={placeholder}
+          style={{ paddingRight: '44px', fontFamily: "'JetBrains Mono', monospace" }}
+        />
+        <button type="button" onClick={() => onToggleKey(field)}
+          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer' }}>
+          {showKeys[field] ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function Settings() {
   const settings = useAppStore(s => s.settings);
@@ -22,26 +44,32 @@ export default function Settings() {
   const currentUser = useAppStore(s => s.currentUser);
 
   const [tab, setTab] = useState('general');
-  const [form, setForm] = useState({ ...settings });
+  // `overrides` are user edits. Rendered form = settings + overrides, so remote
+  // settings updates flow in automatically without a sync effect.
+  const [overrides, setOverrides] = useState({});
   const [showKeys, setShowKeys] = useState({});
   const [showReset, setShowReset] = useState(false);
   const [showClear, setShowClear] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
 
+  const inviteLoadedRef = useRef(false);
   useEffect(() => {
+    if (inviteLoadedRef.current) return;
     if (currentUser?.role === 'admin') {
+      inviteLoadedRef.current = true;
       getInviteCode().then(code => { if (code) setInviteCode(code); });
     }
-  }, [currentUser]);
+  }, [currentUser, getInviteCode]);
 
-  // Sync form when settings change externally (Firebase sync)
-  useEffect(() => { setForm(f => ({ ...settings, ...f })); }, [settings]);
-
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+  const form = { ...settings, ...overrides };
+  const set = (key, val) => setOverrides(o => ({ ...o, [key]: val }));
   const toggleKey = (key) => setShowKeys(s => ({ ...s, [key]: !s[key] }));
 
-  const handleSave = () => updateSettings(form);
+  const handleSave = () => {
+    updateSettings(form);
+    setOverrides({});
+  };
 
   const sectionStyle = { marginBottom: '32px' };
   const titleStyle = { fontSize: '15px', fontWeight: 700, marginBottom: '14px', color: 'var(--text)', borderBottom: '1px solid var(--border)', paddingBottom: '8px' };
@@ -49,23 +77,18 @@ export default function Settings() {
   const labelStyle = { display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text2)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' };
   const hintStyle = { fontSize: '11px', color: 'var(--muted)', marginTop: '4px' };
 
-  const SecretField = ({ label, field, placeholder }) => (
-    <div style={fieldStyle}>
-      <label style={labelStyle}>{label}</label>
-      <div style={{ position: 'relative' }}>
-        <input
-          type={showKeys[field] ? 'text' : 'password'}
-          value={form[field] || ''}
-          onChange={e => set(field, e.target.value)}
-          placeholder={placeholder}
-          style={{ paddingRight: '44px', fontFamily: "'JetBrains Mono', monospace" }}
-        />
-        <button onClick={() => toggleKey(field)}
-          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer' }}>
-          {showKeys[field] ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
-      </div>
-    </div>
+  const renderSecretField = (label, field, placeholder) => (
+    <SecretField
+      label={label}
+      field={field}
+      placeholder={placeholder}
+      form={form}
+      onSet={set}
+      showKeys={showKeys}
+      onToggleKey={toggleKey}
+      labelStyle={labelStyle}
+      fieldStyle={fieldStyle}
+    />
   );
 
   return (
@@ -197,14 +220,14 @@ export default function Settings() {
         <>
           <div style={sectionStyle}>
             <h3 style={titleStyle}>Anthropic (AI)</h3>
-            <SecretField label="Anthropic API Key" field="anthropicApiKey" placeholder="sk-ant-..." />
+            {renderSecretField('Anthropic API Key', 'anthropicApiKey', 'sk-ant-...')}
             <p style={hintStyle}>Powers AI lead generation, outreach sequences, and proposals</p>
           </div>
 
           <div style={sectionStyle}>
             <h3 style={titleStyle}>Stripe (Payments)</h3>
-            <SecretField label="Stripe Secret Key" field="stripeSecretKey" placeholder="sk_live_..." />
-            <SecretField label="Stripe Webhook Secret" field="stripeWebhookSecret" placeholder="whsec_..." />
+            {renderSecretField('Stripe Secret Key', 'stripeSecretKey', 'sk_live_...')}
+            {renderSecretField('Stripe Webhook Secret', 'stripeWebhookSecret', 'whsec_...')}
             <div style={fieldStyle}>
               <label style={labelStyle}>Launchpad Payment Link ($997)</label>
               <input value={form.stripeLaunchpadUrl || ''} onChange={e => set('stripeLaunchpadUrl', e.target.value)} placeholder="https://buy.stripe.com/..." style={{ fontFamily: "'JetBrains Mono', monospace" }} />
@@ -225,7 +248,7 @@ export default function Settings() {
             <p style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '14px' }}>
               Send SMS/email, sync contacts, trigger workflows directly from the console.
             </p>
-            <SecretField label="GHL API Key" field="ghlApiKey" placeholder="eyJhbGciOi..." />
+            {renderSecretField('GHL API Key', 'ghlApiKey', 'eyJhbGciOi...')}
             <div style={fieldStyle}>
               <label style={labelStyle}>GHL Location ID</label>
               <input value={form.ghlLocationId || ''} onChange={e => set('ghlLocationId', e.target.value)} placeholder="ve9EPM428h8vShlRW1KT" style={{ fontFamily: "'JetBrains Mono', monospace" }} />
@@ -239,7 +262,7 @@ export default function Settings() {
 
           <div style={sectionStyle}>
             <h3 style={titleStyle}>SendGrid (Email)</h3>
-            <SecretField label="SendGrid API Key" field="sendgridApiKey" placeholder="SG...." />
+            {renderSecretField('SendGrid API Key', 'sendgridApiKey', 'SG....')}
             <p style={hintStyle}>Used for digest emails and transactional emails. Optional — falls back to GHL for sending.</p>
           </div>
         </>
@@ -380,7 +403,7 @@ export default function Settings() {
       <ConfirmDialog
         open={showReset}
         onClose={() => setShowReset(false)}
-        onConfirm={() => { resetSettings(); setForm({ ...useAppStore.getState().settings }); }}
+        onConfirm={() => { resetSettings(); setOverrides({}); }}
         title="Reset Settings"
         message="This will reset all settings to their default values. Your leads, calls, and other data will not be affected."
       />

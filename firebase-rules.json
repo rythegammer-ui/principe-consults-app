@@ -1,6 +1,29 @@
 {
   "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null"
+    "accounts": {
+      "$accountId": {
+        ".read": "auth != null && (auth.uid === $accountId || root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId)",
+        ".write": "auth != null && (auth.uid === $accountId || root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId)",
+        "profile": {
+          ".read": "auth != null"
+        },
+        "users": {
+          ".read": "auth != null"
+        }
+      }
+    },
+    "userAccounts": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['accountId', 'userId']) && (!data.exists() || newData.child('accountId').val() === data.child('accountId').val())"
+      }
+    },
+    "emailIndex": {
+      "$emailKey": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
   }
 }
