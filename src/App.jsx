@@ -1,9 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import useAppStore from './store/useAppStore';
 import { canAccess } from './utils/permissions';
 import { isFirebaseConfigured } from './utils/firebase';
 import { ToastContainer } from './components/ui';
+import { checkStaleLeads, checkOverduePayments } from './lib/pipelineTriggers';
+import { autoCheckSequences } from './lib/emailAutomation';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -98,7 +100,7 @@ function FirebaseCheck() {
   return null;
 }
 
-function LoadingScreen() {
+function LoadingScreen({ stalled, onRetry }) {
   return (
     <div style={{
       minHeight: '100vh',
@@ -106,19 +108,28 @@ function LoadingScreen() {
       alignItems: 'center',
       justifyContent: 'center',
       background: 'var(--bg)',
+      padding: '20px',
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{
           width: 48, height: 48, background: 'var(--red)', borderRadius: '10px',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: '18px', color: 'white',
-          marginBottom: '16px', animation: 'pulse 1.5s infinite',
+          marginBottom: '16px', animation: stalled ? 'none' : 'pulse 1.5s infinite',
         }}>
           PC
         </div>
         <div style={{ color: 'var(--muted)', fontSize: '13px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-          Loading...
+          {stalled ? 'Still loading…' : 'Loading…'}
         </div>
+        {stalled && (
+          <div style={{ marginTop: '16px', maxWidth: '320px', color: 'var(--text2)', fontSize: '13px' }}>
+            <p style={{ marginBottom: '12px' }}>
+              We can't reach the server. Check your connection and try again.
+            </p>
+            <button className="btn-red" onClick={onRetry}>Retry</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -127,17 +138,45 @@ function LoadingScreen() {
 export default function App() {
   const authLoading = useAppStore(s => s.authLoading);
   const initAuth = useAppStore(s => s.initAuth);
+  const accountId = useAppStore(s => s.accountId);
+  const [stalled, setStalled] = useState(false);
 
   useEffect(() => {
     initAuth();
-  }, []);
+  }, [initAuth]);
+
+  // Watchdog: if auth init hangs longer than 10s, give the user an explicit
+  // failure state instead of an infinite spinner.
+  useEffect(() => {
+    if (!authLoading) {
+      setStalled(false);
+      return;
+    }
+    const t = setTimeout(() => setStalled(true), 10000);
+    return () => clearTimeout(t);
+  }, [authLoading]);
+
+  // Run automation checkers periodically once a tenant is connected. These
+  // were previously imported but never called — sequences, stale flags, and
+  // overdue-payment flags are pure client-side scheduling.
+  useEffect(() => {
+    if (!accountId) return;
+    const tick = () => {
+      try { checkStaleLeads(); } catch (err) { console.warn('checkStaleLeads:', err); }
+      try { checkOverduePayments(); } catch (err) { console.warn('checkOverduePayments:', err); }
+      try { autoCheckSequences(); } catch (err) { console.warn('autoCheckSequences:', err); }
+    };
+    tick();
+    const id = setInterval(tick, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [accountId]);
 
   // Show Firebase setup screen if not configured
   const firebaseCheckEl = FirebaseCheck();
   if (firebaseCheckEl) return firebaseCheckEl;
 
   // Show loading while auth initializes
-  if (authLoading) return <LoadingScreen />;
+  if (authLoading) return <LoadingScreen stalled={stalled} onRetry={() => window.location.reload()} />;
 
   return (
     <BrowserRouter>

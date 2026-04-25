@@ -1,9 +1,12 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { Kanban, Plus, Sparkles } from 'lucide-react';
 import { DragDropContext, Droppable } from '@hello-pangea/dnd';
 import useAppStore from '../../store/useAppStore';
 import KanbanCard from './KanbanCard';
 import LeadDetailPanel from '../leads/LeadDetailPanel';
-import { LEAD_STATUSES, STATUS_COLORS, formatCurrency } from '../../utils/formatters';
+import { EmptyState } from '../ui';
+import { LEAD_STATUSES, formatCurrency } from '../../utils/formatters';
 import { canSeeAllLeads } from '../../utils/permissions';
 import { useIsMobile } from '../../utils/hooks';
 
@@ -47,6 +50,25 @@ export default function KanbanBoard() {
       }
     }
   };
+
+  if (visibleLeads.length === 0) {
+    return (
+      <div className="card" style={{ padding: '40px 20px' }}>
+        <EmptyState
+          icon={Kanban}
+          message="No leads in your pipeline yet — add your first one to start working it through the stages."
+        />
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+          <Link to="/leads" className="btn-red" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+            <Plus size={14} /> Add a Lead
+          </Link>
+          <Link to="/lead-gen" className="btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+            <Sparkles size={14} /> Generate with AI
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

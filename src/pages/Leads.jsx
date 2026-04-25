@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Upload, Download, Search, Flame, RefreshCw } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import LeadTable from '../components/leads/LeadTable';
@@ -19,7 +20,8 @@ export default function Leads() {
   const users = useAppStore(s => s.users);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [search, setSearch] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get('q') || '');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterCity, setFilterCity] = useState('');
@@ -27,6 +29,13 @@ export default function Leads() {
   const [sortBy, setSortBy] = useState('score');
   const [hotOnly, setHotOnly] = useState(false);
   const isMobile = useIsMobile();
+
+  // Pull external `?q=` updates (e.g., when the TopBar search is used twice).
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q != null && q !== search) setSearch(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const visibleLeads = useMemo(() => {
     let filtered = canSeeAllLeads(currentUser?.role) ? leads : leads.filter(l => l.assignedTo === currentUser?.id);
@@ -71,7 +80,16 @@ export default function Leads() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '8px' : '10px', marginBottom: isMobile ? '12px' : '20px', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: isMobile ? '100%' : '320px', width: isMobile ? '100%' : 'auto' }}>
           <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads..." style={{ paddingLeft: '36px', height: '38px' }} />
+          <input
+            value={search}
+            onChange={e => {
+              setSearch(e.target.value);
+              if (e.target.value) setSearchParams({ q: e.target.value }, { replace: true });
+              else setSearchParams({}, { replace: true });
+            }}
+            placeholder="Search leads..."
+            style={{ paddingLeft: '36px', height: '38px' }}
+          />
         </div>
 
         {!isMobile && (

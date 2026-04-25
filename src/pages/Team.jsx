@@ -1,8 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Plus, BarChart3, Activity, Copy, Check } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Plus, BarChart3, Activity, Copy, Check, UsersRound } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import useAppStore from '../store/useAppStore';
-import { Modal, Avatar, RoleBadge, StatusBadge } from '../components/ui';
+import { Modal, Avatar, RoleBadge, StatusBadge, EmptyState } from '../components/ui';
 import { formatCurrency } from '../utils/formatters';
 import { startOfWeek, addDays, isWithinInterval, format } from 'date-fns';
 
@@ -15,16 +15,14 @@ export default function Team() {
   const settings = useAppStore(s => s.settings);
   const activityLog = useAppStore(s => s.activityLog);
   const addNotification = useAppStore(s => s.addNotification);
-  const getInviteCode = useAppStore(s => s.getInviteCode);
+  const currentUser = useAppStore(s => s.currentUser);
+  const accountId = useAppStore(s => s.accountId);
   const [showAdd, setShowAdd] = useState(false);
   const [showPerf, setShowPerf] = useState(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: 'rep', notes: '' });
-  const [inviteCode, setInviteCode] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
 
-  useEffect(() => {
-    getInviteCode().then(code => { if (code) setInviteCode(code); });
-  }, [getInviteCode]);
+  const inviteCode = currentUser?.role === 'admin' ? accountId || '' : '';
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -125,7 +123,15 @@ export default function Team() {
       )}
 
       {/* Team Table */}
-      <div className="card" style={{ padding: '4px', marginBottom: '24px' }}>
+      <div className="card" style={{ padding: teamData.length === 0 ? '20px' : '4px', marginBottom: '24px' }}>
+        {teamData.length === 0 ? (
+          <EmptyState
+            icon={UsersRound}
+            message={inviteCode ? "You're flying solo. Share your invite code to bring on your first rep." : 'No active team members yet.'}
+            action={inviteCode ? 'Copy Invite Code' : undefined}
+            onAction={inviteCode ? copyInviteCode : undefined}
+          />
+        ) : (
         <table>
           <thead>
             <tr>
@@ -193,6 +199,7 @@ export default function Team() {
             ))}
           </tbody>
         </table>
+        )}
       </div>
 
       {/* Add User Modal */}

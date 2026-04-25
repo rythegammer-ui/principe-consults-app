@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Bell, UserPlus, MessageSquare, Calendar, CheckCircle2, CreditCard, DollarSign, Zap, AlertTriangle, FileText, X } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { Avatar } from '../ui';
@@ -18,6 +19,13 @@ export default function TopBar({ title }) {
   const [showPanel, setShowPanel] = useState(false);
   const panelRef = useRef(null);
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+
+  const submitSearch = (e) => {
+    e.preventDefault();
+    const q = search.trim();
+    navigate(q ? `/leads?q=${encodeURIComponent(q)}` : '/leads');
+  };
 
   const unreadCount = appNotifications.filter(n => !n.read).length;
 
@@ -48,15 +56,15 @@ export default function TopBar({ title }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '10px' : '16px' }}>
         {!isMobile && (
-          <div style={{ position: 'relative', width: '260px' }}>
+          <form onSubmit={submitSearch} style={{ position: 'relative', width: '260px' }}>
             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search..."
+              placeholder="Search leads…"
               style={{ paddingLeft: '36px', height: '36px', fontSize: '13px', background: 'var(--surface2)' }}
             />
-          </div>
+          </form>
         )}
 
         {/* Notification bell */}

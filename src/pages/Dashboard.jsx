@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { Users, Zap, Calendar, CheckCircle2, DollarSign } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Users, Zap, Calendar, CheckCircle2, DollarSign, Sparkles, Plus, Upload } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import useAppStore from '../store/useAppStore';
 import { StatCard, StatusBadge, Avatar } from '../components/ui';
@@ -92,6 +93,8 @@ export default function Dashboard() {
 
   const isMobile = useIsMobile();
 
+  const showFirstRun = myLeads.length === 0;
+
   return (
     <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
       {/* Greeting */}
@@ -101,6 +104,30 @@ export default function Dashboard() {
         </h1>
         <p style={{ color: 'var(--text2)', fontSize: '14px' }}>{formatDate(new Date())}</p>
       </div>
+
+      {showFirstRun && (
+        <div className="card" style={{ padding: '24px', marginBottom: '20px', border: '1px solid var(--red-dim)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <Sparkles size={18} style={{ color: 'var(--red)' }} />
+            <h3 style={{ fontSize: '16px', fontWeight: 700 }}>Get your first lead in.</h3>
+          </div>
+          <p style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '16px' }}>
+            Your dashboard lights up once you've got real leads in the system.
+            Pick the fastest path:
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <Link to="/lead-gen" className="btn-red" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+              <Sparkles size={14} /> Generate with AI
+            </Link>
+            <Link to="/leads" className="btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+              <Upload size={14} /> Import a CSV
+            </Link>
+            <Link to="/leads" className="btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+              <Plus size={14} /> Add Manually
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: isMobile ? '8px' : '12px', marginBottom: isMobile ? '16px' : '24px' }}>

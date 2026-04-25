@@ -16,30 +16,37 @@ const TYPE_CONFIG = {
 
 const FILTERS = ['All', 'Outreach', 'Calls', 'Pipeline', 'Payments', 'Team', 'System'];
 
+const FILTER_MAP = {
+  Outreach: 'outreach',
+  Calls: 'call',
+  Pipeline: 'pipeline',
+  Payments: 'payment',
+  Team: 'team',
+  System: 'system',
+};
+
 export default function ActivityLog() {
   const activityLog = useAppStore(s => s.activityLog);
   const users = useAppStore(s => s.users);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const bottomRef = useRef(null);
+  const lastCountRef = useRef(activityLog.length);
 
+  // Auto-scroll to the latest entry only when a new entry is appended.
+  // Don't auto-scroll on initial mount or when the user scrolls back through
+  // history — that fights the user.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (activityLog.length > lastCountRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    lastCountRef.current = activityLog.length;
   }, [activityLog.length]);
-
-  const filterMap = {
-    Outreach: 'outreach',
-    Calls: 'call',
-    Pipeline: 'pipeline',
-    Payments: 'payment',
-    Team: 'team',
-    System: 'system',
-  };
 
   const filtered = useMemo(() => {
     let items = [...activityLog].reverse();
     if (filter !== 'All') {
-      const type = filterMap[filter];
+      const type = FILTER_MAP[filter];
       if (type) items = items.filter(a => a.type === type);
     }
     if (search) {
