@@ -10,6 +10,7 @@ export default function ProposalModal({ open, onClose, leadId }) {
   const lead = useMemo(() => leads.find(l => l.id === leadId), [leads, leadId]);
   const updateLead = useAppStore(s => s.updateLead);
   const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const addNotification = useAppStore(s => s.addNotification);
   const addActivity = useAppStore(s => s.addActivity);
   const currentUser = useAppStore(s => s.currentUser);
@@ -28,14 +29,15 @@ export default function ProposalModal({ open, onClose, leadId }) {
   const proposal = lead.proposal || null;
 
   const generate = async () => {
-    if (!settings.anthropicApiKey) {
-      addNotification('Set your Anthropic API key in Settings first.', 'error');
+    const apiKey = secrets?.anthropicApiKey;
+    if (!apiKey) {
+      addNotification('Set your Anthropic API key in Settings → Integrations first.', 'error');
       return;
     }
     setGenerating(true);
     try {
       const prompt = buildProposalPrompt(lead, settings, selectedTier);
-      const responseText = await callClaude(settings.anthropicApiKey, PROPOSAL_SYSTEM_PROMPT, prompt);
+      const responseText = await callClaude(apiKey, PROPOSAL_SYSTEM_PROMPT, prompt);
       const parsed = JSON.parse(responseText);
       updateLead(lead.id, { proposal: { ...parsed, generatedAt: new Date().toISOString(), tier: selectedTier } });
       addActivity(`Proposal generated for "${lead.businessName}" (${selectedTier})`, 'lead', currentUser?.id, lead.id);
@@ -58,38 +60,48 @@ export default function ProposalModal({ open, onClose, leadId }) {
   const handlePrint = () => {
     const content = proposalRef.current;
     if (!content) return;
-    const win = window.open('', '_blank');
-    win.document.write(`
-      <html>
-        <head>
-          <title>Proposal — ${lead.businessName}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Manrope', sans-serif; color: #1a1a1a; padding: 48px; max-width: 800px; margin: 0 auto; line-height: 1.6; }
-            h1, h2, h3 { font-family: 'Syne', sans-serif; }
-            h1 { font-size: 28px; margin-bottom: 8px; }
-            h2 { font-size: 18px; margin-top: 32px; margin-bottom: 12px; color: #e63228; }
-            h3 { font-size: 15px; margin-bottom: 8px; }
-            p { margin-bottom: 12px; font-size: 14px; }
-            ul { padding-left: 20px; margin-bottom: 16px; }
-            li { margin-bottom: 6px; font-size: 14px; }
-            .header { border-bottom: 3px solid #e63228; padding-bottom: 20px; margin-bottom: 32px; }
-            .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 14px; color: #e63228; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
-            .meta { font-size: 12px; color: #666; }
-            .investment-box { background: #f8f8f8; border: 2px solid #e63228; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; }
-            .investment-box .price { font-size: 32px; font-weight: 700; color: #e63228; font-family: 'Syne', sans-serif; }
-            .investment-box .monthly { font-size: 16px; color: #666; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
-            @media print { body { padding: 24px; } }
-          </style>
-        </head>
-        <body>
-          ${content.innerHTML}
-        </body>
-      </html>
-    `);
+    const win = window.open('', '_blank', 'noopener,noreferrer');
+    if (!win) {
+      addNotification('Pop-up blocked. Allow pop-ups to print proposals.', 'error');
+      return;
+    }
+    // The body content is React-rendered DOM (already escaped). Only static
+    // chrome (CSS, fonts) is interpolated below — never user-controlled
+    // strings — so the popup can't be coerced into running attacker JS.
+    win.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Manrope', sans-serif; color: #1a1a1a; padding: 48px; max-width: 800px; margin: 0 auto; line-height: 1.6; }
+      h1, h2, h3 { font-family: 'Syne', sans-serif; }
+      h1 { font-size: 28px; margin-bottom: 8px; }
+      h2 { font-size: 18px; margin-top: 32px; margin-bottom: 12px; color: #e63228; }
+      h3 { font-size: 15px; margin-bottom: 8px; }
+      p { margin-bottom: 12px; font-size: 14px; }
+      ul { padding-left: 20px; margin-bottom: 16px; }
+      li { margin-bottom: 6px; font-size: 14px; }
+      .header { border-bottom: 3px solid #e63228; padding-bottom: 20px; margin-bottom: 32px; }
+      .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 14px; color: #e63228; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+      .meta { font-size: 12px; color: #666; }
+      .investment-box { background: #f8f8f8; border: 2px solid #e63228; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; }
+      .investment-box .price { font-size: 32px; font-weight: 700; color: #e63228; font-family: 'Syne', sans-serif; }
+      .investment-box .monthly { font-size: 16px; color: #666; }
+      .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
+      @media print { body { padding: 24px; } }
+    </style>
+  </head>
+  <body><div id="proposal-root"></div></body>
+</html>`);
     win.document.close();
+    // Set the (potentially user-controlled) title via DOM textContent so it
+    // can't break out of the markup.
+    win.document.title = `Proposal — ${lead.businessName || ''}`;
+    const root = win.document.getElementById('proposal-root');
+    if (root) root.innerHTML = content.innerHTML;
+    try { win.opener = null; } catch { /* ignore */ }
     setTimeout(() => { win.print(); }, 500);
   };
 

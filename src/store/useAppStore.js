@@ -9,7 +9,6 @@ import {
   signIn,
   signOut,
   onAuthChanged,
-  encodeEmail,
   isFirebaseConfigured,
   deleteCurrentAuthUser,
 } from '../utils/firebase';
@@ -17,6 +16,9 @@ import {
 const normalizeEmail = (email) => (email || '').trim().toLowerCase();
 
 // ── Default settings for new accounts ───────────────────────
+// Settings are readable by every account member (and editable by admins).
+// Sensitive credentials live in `secrets` (see DEFAULT_SECRETS) and are
+// gated by stricter rules so reps can't change them.
 const DEFAULT_SETTINGS = {
   // Agency
   agencyName: 'Principe Consults',
@@ -30,23 +32,16 @@ const DEFAULT_SETTINGS = {
   avgDealFullStack: 5000,
   retainerGrowth: 500,
   retainerFullStack: 1000,
-  // Stripe Payment Links
+  // Stripe Payment Links (these are public payment URLs, not secrets)
   stripeLaunchpadUrl: '',
   stripeGrowthUrl: '',
   stripeFullStackUrl: '',
-  stripeSecretKey: '',
-  stripeWebhookSecret: '',
   // Communications
   bookingLink: '',
   calendarName: '',
   clientIntakeFormUrl: '',
-  digestEmailRecipients: '',
-  sendgridApiKey: '',
-  // Integrations
-  anthropicApiKey: '',
-  ghlApiKey: '',
+  // Integrations (non-sensitive identifiers)
   ghlLocationId: '',
-  ghlWorkflows: '',
   // Commissions
   commissionDemo: 50,
   commissionLaunchpad: 150,
@@ -61,31 +56,73 @@ const DEFAULT_SETTINGS = {
   warmScoreCutoff: 40,
 };
 
+// Credentials and other sensitive values. Stored under `accounts/$id/secrets`
+// (admin-only writes). We still expose a member read so the integrations the
+// reps use day-to-day (GHL messaging, AI proposals) keep working without a
+// server-side relay. Anything genuinely fatal-on-leak (Stripe secret key) is
+// admin-only via the role check the Settings page already enforces.
+const DEFAULT_SECRETS = {
+  stripeSecretKey: '',
+  stripeWebhookSecret: '',
+  anthropicApiKey: '',
+  ghlApiKey: '',
+  ghlWorkflows: '',
+  sendgridApiKey: '',
+  digestEmailRecipients: '',
+};
+
+const SECRET_KEYS = Object.keys(DEFAULT_SECRETS);
+
 let idCounter = Date.now();
 const genId = (prefix = '') => prefix + (++idCounter).toString(36);
 
-// Invite code = the account's Firebase UID (guaranteed unique, no index needed)
+// Invite code = the account's Firebase UID. UIDs are 28-char unguessable
+// strings, so they function as bearer tokens once shared. Cross-tenant leak
+// vectors (emailIndex, world-readable profile/users) were closed in this
+// commit, so the only way to discover an account ID is through the admin
+// sharing it.
 
 // Debounce Firebase writes
-let syncTimers = {};
+const syncTimers = {};
 function debouncedSync(key, data, delay = 500) {
   if (syncTimers[key]) clearTimeout(syncTimers[key]);
   syncTimers[key] = setTimeout(() => {
     const accountId = useAppStore.getState().accountId;
-    if (accountId) {
-      saveToFirebase(`accounts/${accountId}/${key}`, data);
-    }
+    if (!accountId) return;
+    saveToFirebase(`accounts/${accountId}/${key}`, data).catch((err) => {
+      const code = err?.code || err?.message || 'unknown';
+      useAppStore.getState().addNotification(
+        `Couldn't sync ${key} to cloud (${code}). Your changes are local only.`,
+        'error',
+      );
+    });
   }, delay);
 }
 
 // Keys that sync to Firebase under each account
-const SYNC_KEYS = ['users', 'leads', 'callLogs', 'payments', 'payoutRequests', 'activityLog', 'settings'];
+const SYNC_KEYS = ['users', 'leads', 'callLogs', 'payments', 'payoutRequests', 'activityLog', 'settings', 'secrets'];
 
 // Helper: convert Firebase objects back to arrays
-function normalizeData(data) {
+function normalizeData(data, key) {
+  if (data == null) return data;
   if (Array.isArray(data)) return data;
-  if (typeof data === 'object' && data !== null && !data.agencyName) return Object.values(data);
+  if (typeof data === 'object') {
+    if (key === 'settings' || key === 'secrets') return data;
+    return Object.values(data);
+  }
   return data;
+}
+
+// Strip secret-shaped keys out of a settings object — used during migration
+// from the legacy "everything in settings" shape.
+function partitionSettings(input) {
+  const settings = {};
+  const secrets = {};
+  for (const [k, v] of Object.entries(input || {})) {
+    if (SECRET_KEYS.includes(k)) secrets[k] = v;
+    else settings[k] = v;
+  }
+  return { settings, secrets };
 }
 
 const useAppStore = create(
@@ -108,6 +145,7 @@ const useAppStore = create(
       payoutRequests: [],
       activityLog: [],
       settings: DEFAULT_SETTINGS,
+      secrets: DEFAULT_SECRETS,
 
       // ── Auth: Initialize auth state listener ────────────────
       initAuth: () => {
@@ -120,28 +158,25 @@ const useAppStore = create(
           if (firebaseUser) {
             const uid = firebaseUser.uid;
 
-            // Primary lookup: userAccounts/{uid} (secured per-user).
-            // Fallback to emailIndex for pre-existing accounts.
-            let userAccount = await loadFromFirebase(`userAccounts/${uid}`);
-            if (!userAccount && firebaseUser.email) {
-              const emailData = await loadFromFirebase(`emailIndex/${encodeEmail(firebaseUser.email)}`);
-              if (emailData) {
-                userAccount = emailData;
-                // Backfill userAccounts so future reads are fast and rules pass.
-                await saveToFirebase(`userAccounts/${uid}`, emailData);
-              }
+            // Single source of truth: userAccounts/{uid}. The legacy
+            // emailIndex fallback was dropped because it was world-readable
+            // and world-writable.
+            const userAccount = await loadFromFirebase(`userAccounts/${uid}`);
+            if (!userAccount) {
+              // Auth account exists but no membership record — treat as
+              // unfinished signup and clear in-memory state.
+              set({ accountId: null, currentUser: null, authLoading: false });
+              return;
             }
-            const accountId = userAccount?.accountId || uid;
-            const userId = userAccount?.userId || 'owner';
 
+            const { accountId, userId } = userAccount;
             set({ accountId });
 
             // Load account profile
             const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
             if (profile) {
-              // Load users list to find this user's info
               const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
-              const userList = normalizeData(usersData) || [];
+              const userList = normalizeData(usersData, 'users') || [];
               const matchedUser = userList.find(u => u.id === userId) || userList[0];
 
               if (matchedUser) {
@@ -154,8 +189,11 @@ const useAppStore = create(
                 set({ authLoading: false });
               }
               get()._connectToAccount(accountId);
+              // Best-effort migration of legacy secrets stored in settings.
+              if (matchedUser?.role === 'admin') {
+                get()._migrateLegacySecrets(accountId).catch(() => { /* non-fatal */ });
+              }
             } else {
-              // Account record doesn't exist yet (mid-signup)
               set({ authLoading: false });
             }
           } else {
@@ -175,6 +213,7 @@ const useAppStore = create(
               activityLog: [],
               appNotifications: [],
               settings: DEFAULT_SETTINGS,
+              secrets: DEFAULT_SECRETS,
               onboardingComplete: true,
             });
           }
@@ -193,6 +232,7 @@ const useAppStore = create(
       // ── Auth: Signup as ADMIN (creates a new agency account) ──
       signup: async (name, email, password, agencyName) => {
         const normalizedEmail = normalizeEmail(email);
+        const cleanAgencyName = (agencyName || '').trim() || 'Principe Consults';
         const firebaseUser = await createAccount(normalizedEmail, password);
         const accountId = firebaseUser.uid;
 
@@ -207,37 +247,33 @@ const useAppStore = create(
 
         const initialSettings = {
           ...DEFAULT_SETTINGS,
-          agencyName: agencyName || 'Principe Consults',
+          agencyName: cleanAgencyName,
           ownerName: name,
           agencyEmail: normalizedEmail,
         };
 
-        // Create account profile
         const profile = {
           ownerName: name,
           email: normalizedEmail,
-          agencyName: agencyName || 'Principe Consults',
+          agencyName: cleanAgencyName,
           createdAt: new Date().toISOString(),
           onboardingComplete: false,
         };
 
-        // Write userAccounts FIRST so security rules let us write the rest.
+        // Write userAccounts FIRST so the account-member rules let us write
+        // the rest of the tree.
         const userAccountEntry = { accountId, userId: 'owner', role: 'admin' };
         await saveToFirebaseStrict(`userAccounts/${accountId}`, userAccountEntry);
 
-        // Critical: these must actually land or the account is unusable.
         await saveToFirebaseStrict(`accounts/${accountId}/profile`, profile);
         await saveToFirebaseStrict(`accounts/${accountId}/users`, [ownerUser]);
         await saveToFirebaseStrict(`accounts/${accountId}/settings`, initialSettings);
-        // Non-critical initialisations — empty arrays can be auto-created later.
+        await saveToFirebaseStrict(`accounts/${accountId}/secrets`, DEFAULT_SECRETS);
         await saveToFirebase(`accounts/${accountId}/leads`, []);
         await saveToFirebase(`accounts/${accountId}/callLogs`, []);
         await saveToFirebase(`accounts/${accountId}/payments`, []);
         await saveToFirebase(`accounts/${accountId}/payoutRequests`, []);
         await saveToFirebase(`accounts/${accountId}/activityLog`, []);
-
-        // Create email index (readable by all authed users, for invite lookup + login)
-        await saveToFirebaseStrict(`emailIndex/${encodeEmail(normalizedEmail)}`, userAccountEntry);
 
         set({
           accountId,
@@ -249,6 +285,7 @@ const useAppStore = create(
           payoutRequests: [],
           activityLog: [],
           settings: initialSettings,
+          secrets: DEFAULT_SECRETS,
           onboardingComplete: false,
         });
 
@@ -265,82 +302,76 @@ const useAppStore = create(
           throw { code: 'invalid-invite', message: 'Invite code is required.' };
         }
 
-        // Create Firebase Auth account FIRST so we're authenticated
-        // (Firebase rules require auth for reads)
-        const firebaseUser = await createAccount(normalizedEmail, password);
-
-        // Now verify the invite code (account ID) is valid
-        const profile = await loadFromFirebase(`accounts/${accountId}/profile`);
-        if (!profile) {
-          // Invalid code — clean up the newly created auth account so the email isn't orphaned
-          try { await deleteCurrentAuthUser(); } catch { /* ignore */ }
-          try { await signOut(); } catch { /* ignore */ }
+        // Public read of the agency name verifies the invite without
+        // exposing other tenant data.
+        const agencyName = await loadFromFirebase(`accounts/${accountId}/profile/agencyName`);
+        if (!agencyName) {
           throw { code: 'invalid-invite', message: 'Invalid invite code. Ask your admin for the correct code.' };
         }
 
-        // If admin pre-created a seat for this email, reuse the existing userId
-        const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
-        const userList = normalizeData(usersData) || [];
-        const existingSeat = userList.find(u => normalizeEmail(u.email) === normalizedEmail);
-        const userId = existingSeat?.id || genId('U');
+        // Create the auth account only after the invite is confirmed valid.
+        const firebaseUser = await createAccount(normalizedEmail, password);
 
-        const newUser = {
-          id: userId,
-          name,
-          email: normalizedEmail,
-          role: existingSeat?.role || 'rep',
-          avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-          active: true,
-          pendingSignup: false,
-        };
+        try {
+          // Pull users to find any pre-created seat for this email.
+          const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
+          const userList = normalizeData(usersData, 'users') || [];
+          const existingSeat = userList.find(u => normalizeEmail(u.email) === normalizedEmail);
+          // Default any joiner to 'rep' — admins can never be self-claimed.
+          // Pre-created 'manager' seats keep their role.
+          const safeRole = existingSeat?.role === 'manager' ? 'manager' : 'rep';
+          const userId = existingSeat?.id || genId('U');
 
-        // Write userAccounts FIRST — security rules need this to allow the
-        // subsequent write to accounts/{accountId}/users.
-        const userAccountEntry = { accountId, userId: newUser.id, role: newUser.role };
-        await saveToFirebaseStrict(`userAccounts/${firebaseUser.uid}`, userAccountEntry);
+          const newUser = {
+            id: userId,
+            name,
+            email: normalizedEmail,
+            role: safeRole,
+            avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
+            active: true,
+            pendingSignup: false,
+          };
 
-        // Replace seat if present, else append
-        const nextUsers = existingSeat
-          ? userList.map(u => u.id === userId ? { ...u, ...newUser } : u)
-          : [...userList, newUser];
-        await saveToFirebaseStrict(`accounts/${accountId}/users`, nextUsers);
+          // userAccounts must be written first; rules require it for the
+          // subsequent users-array write.
+          const userAccountEntry = { accountId, userId: newUser.id, role: safeRole };
+          await saveToFirebaseStrict(`userAccounts/${firebaseUser.uid}`, userAccountEntry);
 
-        // Create email index pointing to this account
-        await saveToFirebaseStrict(`emailIndex/${encodeEmail(normalizedEmail)}`, userAccountEntry);
+          const nextUsers = existingSeat
+            ? userList.map(u => u.id === userId ? { ...u, ...newUser } : u)
+            : [...userList, newUser];
+          await saveToFirebaseStrict(`accounts/${accountId}/users`, nextUsers);
 
-        set({
-          accountId,
-          currentUser: newUser,
-          onboardingComplete: false, // reps go through training onboarding
-        });
+          set({
+            accountId,
+            currentUser: newUser,
+            onboardingComplete: false,
+          });
 
-        get()._connectToAccount(accountId);
-        return true;
+          get()._connectToAccount(accountId);
+          return true;
+        } catch (err) {
+          // If anything after auth-creation failed, roll back the auth user
+          // so the email isn't squatted with no membership record.
+          try { await deleteCurrentAuthUser(); } catch { /* ignore */ }
+          try { await signOut(); } catch { /* ignore */ }
+          throw err;
+        }
       },
 
       // ── Auth: Login ─────────────────────────────────────────
       login: async (email, password) => {
         try {
           const normalizedEmail = normalizeEmail(email);
-          // Firebase Auth sign-in (works for both owners and reps)
           const firebaseUser = await signIn(normalizedEmail, password);
 
-          // Primary lookup: userAccounts/{uid} (scoped by rules). Fallback: emailIndex.
-          let userAccount = await loadFromFirebase(`userAccounts/${firebaseUser.uid}`);
-          if (!userAccount) {
-            userAccount = await loadFromFirebase(`emailIndex/${encodeEmail(normalizedEmail)}`);
-            if (userAccount) {
-              // Backfill for future rule-based reads
-              await saveToFirebase(`userAccounts/${firebaseUser.uid}`, userAccount);
-            }
-          }
+          const userAccount = await loadFromFirebase(`userAccounts/${firebaseUser.uid}`);
           if (!userAccount) return false;
 
           const { accountId, userId } = userAccount;
 
-          // Load the user's info from the account
           const usersData = await loadFromFirebase(`accounts/${accountId}/users`);
-          const userList = normalizeData(usersData) || [];
+          const userList = normalizeData(usersData, 'users') || [];
           const user = userList.find(u => u.id === userId);
           if (!user) return false;
 
@@ -376,11 +407,10 @@ const useAppStore = create(
           activityLog: [],
           appNotifications: [],
           settings: DEFAULT_SETTINGS,
+          secrets: DEFAULT_SECRETS,
           onboardingComplete: true,
         });
-        // Wipe persisted cache so cross-user sessions can't see stale data.
         try { localStorage.removeItem('principe-console-storage'); } catch { /* ignore */ }
-        // Signal other tabs to log out too.
         try { localStorage.setItem('principe-console-logout', String(Date.now())); } catch { /* ignore */ }
       },
 
@@ -390,9 +420,13 @@ const useAppStore = create(
 
         const unsubs = SYNC_KEYS.map(key => {
           return subscribeToFirebase(`accounts/${accountId}/${key}`, (data) => {
-            if (data != null) {
-              const value = key === 'settings' ? data : normalizeData(data);
-              set({ [key]: value });
+            const value = normalizeData(data, key);
+            if (key === 'settings') {
+              set({ settings: value || DEFAULT_SETTINGS });
+            } else if (key === 'secrets') {
+              set({ secrets: value || DEFAULT_SECRETS });
+            } else {
+              set({ [key]: value || [] });
             }
           });
         });
@@ -413,6 +447,24 @@ const useAppStore = create(
         debouncedSync(key, get()[key]);
       },
 
+      // ── Internal: One-time migration of legacy secrets in settings ──
+      _migrateLegacySecrets: async (accountId) => {
+        const settings = await loadFromFirebase(`accounts/${accountId}/settings`);
+        if (!settings || typeof settings !== 'object') return;
+        const hasLegacy = SECRET_KEYS.some(k => settings[k] != null && settings[k] !== '');
+        if (!hasLegacy) return;
+        const existingSecrets = (await loadFromFirebase(`accounts/${accountId}/secrets`)) || {};
+        const { settings: cleanSettings, secrets: extracted } = partitionSettings(settings);
+        const mergedSecrets = { ...DEFAULT_SECRETS, ...existingSecrets, ...extracted };
+        try {
+          await saveToFirebaseStrict(`accounts/${accountId}/secrets`, mergedSecrets);
+          await saveToFirebaseStrict(`accounts/${accountId}/settings`, cleanSettings);
+          get().addNotification('Migrated legacy API credentials to secured storage.', 'success');
+        } catch (err) {
+          console.warn('Secret migration deferred:', err);
+        }
+      },
+
       // ── Get invite code (admin only) — the invite code IS the accountId ──
       getInviteCode: async () => {
         return get().accountId || null;
@@ -429,13 +481,21 @@ const useAppStore = create(
         const accountId = get().accountId;
         if (!accountId) return;
 
-        const newSettings = { ...get().settings, ...settingsPatch };
-        set({ settings: newSettings, onboardingComplete: true });
+        const { settings: settingsOnly, secrets: secretsFromPatch } = partitionSettings(settingsPatch || {});
+        const newSettings = { ...get().settings, ...settingsOnly };
+        const newSecrets = Object.keys(secretsFromPatch).length
+          ? { ...get().secrets, ...secretsFromPatch }
+          : get().secrets;
+
+        set({ settings: newSettings, secrets: newSecrets, onboardingComplete: true });
 
         await saveToFirebase(`accounts/${accountId}/settings`, newSettings);
+        if (Object.keys(secretsFromPatch).length) {
+          await saveToFirebase(`accounts/${accountId}/secrets`, newSecrets);
+        }
         await saveToFirebase(`accounts/${accountId}/profile/onboardingComplete`, true);
-        if (settingsPatch.agencyName) {
-          await saveToFirebase(`accounts/${accountId}/profile/agencyName`, settingsPatch.agencyName);
+        if (settingsOnly.agencyName) {
+          await saveToFirebase(`accounts/${accountId}/profile/agencyName`, settingsOnly.agencyName);
         }
         get().addActivity('Account onboarding completed', 'system', 'owner');
       },
@@ -485,7 +545,6 @@ const useAppStore = create(
         set(s => ({ leads: s.leads.map(l => l.id === leadId ? { ...l, status: newStatus, lastActivityAt: new Date().toISOString(), isStale: false } : l) }));
         if (lead) {
           get().addActivity(`"${lead.businessName}" moved from ${oldStatus} to ${newStatus}`, 'pipeline', get().currentUser?.id, leadId);
-          // Fire pipeline automation triggers
           try {
             import('../lib/pipelineTriggers').then(({ onStageChange }) => {
               onStageChange({ ...lead, status: newStatus }, oldStatus, newStatus);
@@ -529,6 +588,10 @@ const useAppStore = create(
       },
       approvePayout: (id) => {
         const admin = get().currentUser;
+        if (admin?.role !== 'admin' && admin?.role !== 'manager') {
+          get().addNotification('Only admins or managers can approve payouts.', 'error');
+          return;
+        }
         set(s => ({
           payoutRequests: s.payoutRequests.map(r => r.id === id ? {
             ...r, status: 'approved', reviewedBy: admin.id, reviewedAt: new Date().toISOString(),
@@ -541,6 +604,10 @@ const useAppStore = create(
       },
       rejectPayout: (id, reason) => {
         const admin = get().currentUser;
+        if (admin?.role !== 'admin' && admin?.role !== 'manager') {
+          get().addNotification('Only admins or managers can reject payouts.', 'error');
+          return;
+        }
         set(s => ({
           payoutRequests: s.payoutRequests.map(r => r.id === id ? {
             ...r, status: 'rejected', reviewedBy: admin.id, reviewedAt: new Date().toISOString(), notes: r.notes + (reason ? ` | Rejected: ${reason}` : ''),
@@ -552,6 +619,10 @@ const useAppStore = create(
       },
       markPayoutPaid: (id, stripePayoutId) => {
         const admin = get().currentUser;
+        if (admin?.role !== 'admin' && admin?.role !== 'manager') {
+          get().addNotification('Only admins or managers can mark payouts paid.', 'error');
+          return;
+        }
         set(s => ({
           payoutRequests: s.payoutRequests.map(r => r.id === id ? {
             ...r, status: 'paid', paidAt: new Date().toISOString(), stripePayoutId: stripePayoutId || null,
@@ -585,11 +656,27 @@ const useAppStore = create(
         set(s => ({ notifications: s.notifications.filter(n => n.id !== id) }));
       },
 
-      // ── Settings ───────────────────────────────────────────
+      // ── Settings (admin-only writes via rules) ─────────────
       updateSettings: (patch) => {
-        set(s => ({ settings: { ...s.settings, ...patch } }));
+        // If the caller passed mixed setting/secret keys (legacy callers),
+        // route the secret keys through updateSecrets.
+        const { settings: settingsOnly, secrets: secretsFromPatch } = partitionSettings(patch);
+        if (Object.keys(settingsOnly).length) {
+          set(s => ({ settings: { ...s.settings, ...settingsOnly } }));
+          get()._syncKey('settings');
+        }
+        if (Object.keys(secretsFromPatch).length) {
+          get().updateSecrets(secretsFromPatch);
+        }
         get().addNotification('Settings saved.', 'success');
-        get()._syncKey('settings');
+      },
+      updateSecrets: (patch) => {
+        if (get().currentUser?.role !== 'admin') {
+          get().addNotification('Only admins can update API credentials.', 'error');
+          return;
+        }
+        set(s => ({ secrets: { ...s.secrets, ...patch } }));
+        get()._syncKey('secrets');
       },
       resetSettings: () => {
         set({ settings: DEFAULT_SETTINGS });
@@ -597,18 +684,13 @@ const useAppStore = create(
       },
 
       // ── Team ───────────────────────────────────────────────
-      // Pre-creates a seat for a rep. The rep completes signup themselves using
-      // the agency invite code — their Firebase Auth account is created at that
-      // point, and joinAgency will merge into this pre-created seat.
       addUser: async (user) => {
         const normalizedEmail = normalizeEmail(user.email);
-        // Prevent duplicate seats for the same email within this account.
         const existing = get().users.find(u => normalizeEmail(u.email) === normalizedEmail);
         if (existing) {
           get().addNotification('A team member with that email already exists.', 'error');
           return existing;
         }
-        // Don't persist any password — reps set their own at signup.
         const rest = { ...user };
         delete rest.password;
         const newUser = { ...rest, email: normalizedEmail, id: genId('U'), active: true, pendingSignup: true };
@@ -670,8 +752,7 @@ const useAppStore = create(
         for (const key of SYNC_KEYS) {
           const data = await loadFromFirebase(`accounts/${accountId}/${key}`);
           if (data != null) {
-            const value = key === 'settings' ? data : normalizeData(data);
-            set({ [key]: value });
+            set({ [key]: normalizeData(data, key) });
           }
         }
         get().addNotification('Data loaded from cloud!', 'success');
@@ -679,17 +760,13 @@ const useAppStore = create(
     }),
     {
       name: 'principe-console-storage',
+      // Persist only auth/UI shell. Tenant data (leads/payments/etc.) is
+      // hydrated from Firebase on connect, so persisting it locally just
+      // creates a cross-session staleness window.
       partialize: (state) => ({
         accountId: state.accountId,
         currentUser: state.currentUser,
         onboardingComplete: state.onboardingComplete,
-        users: state.users,
-        leads: state.leads,
-        callLogs: state.callLogs,
-        payments: state.payments,
-        payoutRequests: state.payoutRequests,
-        activityLog: state.activityLog,
-        settings: state.settings,
         sidebarCollapsed: state.sidebarCollapsed,
       }),
     }

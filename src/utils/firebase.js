@@ -37,16 +37,6 @@ export function isFirebaseConfigured() {
   return !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId && FIREBASE_CONFIG.databaseURL);
 }
 
-export function getDb() {
-  ensureInit();
-  return db;
-}
-
-export function getFirebaseAuth() {
-  ensureInit();
-  return auth;
-}
-
 // ── Auth Functions ──────────────────────────────────────────
 
 export async function createAccount(email, password) {
@@ -90,17 +80,16 @@ export function onAuthChanged(callback) {
 
 // ── Database Functions ──────────────────────────────────────
 
+// Best-effort write — throws on real errors so callers can surface them, but
+// no-ops cleanly when Firebase isn't configured (e.g., dev without env vars).
 export async function saveToFirebase(path, data) {
+  ensureInit();
   if (!db) return;
-  try {
-    await set(ref(db, path), data);
-  } catch (err) {
-    console.error(`Firebase save failed (${path}):`, err);
-  }
+  await set(ref(db, path), data);
 }
 
-// Throwing variant for critical writes (auth flows, onboarding) where we must
-// know whether the write actually landed.
+// Strict variant kept as an alias for paths where the caller must know the
+// write landed. (Same behavior as `saveToFirebase` since that one now throws.)
 export async function saveToFirebaseStrict(path, data) {
   ensureInit();
   if (!db) throw new Error('Firebase not configured');
@@ -119,19 +108,14 @@ export async function loadFromFirebase(path) {
   }
 }
 
+// Always invokes the callback — null when the path is empty/missing — so
+// remote deletions propagate to local state instead of leaving stale data.
 export function subscribeToFirebase(path, callback) {
   if (!db) return () => {};
   const unsubscribe = onValue(ref(db, path), (snapshot) => {
-    if (snapshot.exists()) {
-      callback(snapshot.val());
-    }
+    callback(snapshot.exists() ? snapshot.val() : null);
   }, (err) => {
     console.error(`Firebase subscribe failed (${path}):`, err);
   });
   return unsubscribe;
-}
-
-// Sanitize email for use as a Firebase key (no dots or special chars)
-export function encodeEmail(email) {
-  return email.toLowerCase().replace(/\./g, ',').replace(/@/g, '_at_');
 }

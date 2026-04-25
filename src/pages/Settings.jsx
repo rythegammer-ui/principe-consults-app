@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Eye, EyeOff, Cloud, Upload, Download, Copy, Check, Users, Settings2, CreditCard, Zap, Bell } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import { ConfirmDialog } from '../components/ui';
@@ -34,35 +34,29 @@ function SecretField({ label, field, placeholder, form, onSet, showKeys, onToggl
 
 export default function Settings() {
   const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const updateSettings = useAppStore(s => s.updateSettings);
   const resetSettings = useAppStore(s => s.resetSettings);
   const clearAllData = useAppStore(s => s.clearAllData);
   const firebaseConnected = useAppStore(s => s.firebaseConnected);
   const seedFirebase = useAppStore(s => s.seedFirebase);
   const pullFromFirebase = useAppStore(s => s.pullFromFirebase);
-  const getInviteCode = useAppStore(s => s.getInviteCode);
+  const accountId = useAppStore(s => s.accountId);
   const currentUser = useAppStore(s => s.currentUser);
 
   const [tab, setTab] = useState('general');
-  // `overrides` are user edits. Rendered form = settings + overrides, so remote
-  // settings updates flow in automatically without a sync effect.
+  // `overrides` are user edits. Rendered form = settings + secrets + overrides,
+  // so remote updates flow in automatically without a sync effect. The store
+  // partitions secret-shaped keys back into the right path on save.
   const [overrides, setOverrides] = useState({});
   const [showKeys, setShowKeys] = useState({});
   const [showReset, setShowReset] = useState(false);
   const [showClear, setShowClear] = useState(false);
-  const [inviteCode, setInviteCode] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
 
-  const inviteLoadedRef = useRef(false);
-  useEffect(() => {
-    if (inviteLoadedRef.current) return;
-    if (currentUser?.role === 'admin') {
-      inviteLoadedRef.current = true;
-      getInviteCode().then(code => { if (code) setInviteCode(code); });
-    }
-  }, [currentUser, getInviteCode]);
+  const inviteCode = currentUser?.role === 'admin' ? accountId || '' : '';
 
-  const form = { ...settings, ...overrides };
+  const form = { ...settings, ...(secrets || {}), ...overrides };
   const set = (key, val) => setOverrides(o => ({ ...o, [key]: val }));
   const toggleKey = (key) => setShowKeys(s => ({ ...s, [key]: !s[key] }));
 

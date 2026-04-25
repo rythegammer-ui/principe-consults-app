@@ -1,13 +1,22 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Modal } from '../ui';
 import useAppStore from '../../store/useAppStore';
 import { CALL_OUTCOMES } from '../../utils/formatters';
+import { canSeeAllLeads } from '../../utils/permissions';
 
 export default function LogCallModal({ open, onClose, defaultLeadId = '' }) {
-  const leads = useAppStore(s => s.leads);
+  const allLeads = useAppStore(s => s.leads);
   const currentUser = useAppStore(s => s.currentUser);
   const logCall = useAppStore(s => s.logCall);
   const addNotification = useAppStore(s => s.addNotification);
+
+  // Reps can only log calls against their own assigned leads. Showing other
+  // reps' leads would also leak their pipeline (lead names) to peers.
+  const leads = useMemo(() => {
+    return canSeeAllLeads(currentUser?.role)
+      ? allLeads
+      : allLeads.filter(l => l.assignedTo === currentUser?.id);
+  }, [allLeads, currentUser]);
 
   const now = new Date();
   const [form, setForm] = useState({

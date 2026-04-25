@@ -46,12 +46,13 @@ export default function Signup() {
     e.preventDefault();
     setError('');
 
-    if (!inviteCode.trim()) {
+    const trimmedCode = inviteCode.trim();
+    if (!trimmedCode) {
       setError('Enter the invite code your admin gave you.');
       return;
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
     if (password !== confirmPassword) {
@@ -61,7 +62,7 @@ export default function Signup() {
 
     setLoading(true);
     try {
-      await joinAgency(name, email, password, inviteCode);
+      await joinAgency(name, email, password, trimmedCode);
       navigate('/');
     } catch (err) {
       if (err.code === 'invalid-invite') {
@@ -84,8 +85,12 @@ export default function Signup() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!agencyName.trim()) {
+      setError('Enter a name for your agency.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
     if (password !== confirmPassword) {
@@ -95,7 +100,7 @@ export default function Signup() {
 
     setLoading(true);
     try {
-      await signup(name, email, password, agencyName);
+      await signup(name, email, password, agencyName.trim());
       navigate('/onboarding');
     } catch (err) {
       if (err.code === 'auth/email-already-in-use') {
@@ -312,7 +317,7 @@ export default function Signup() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
+                    placeholder="At least 8 characters"
                     required
                     style={{ paddingRight: '44px' }}
                   />
@@ -393,6 +398,7 @@ export default function Signup() {
                   value={agencyName}
                   onChange={e => setAgencyName(e.target.value)}
                   placeholder="Principe Consults"
+                  required
                 />
               </div>
 
@@ -414,7 +420,7 @@ export default function Signup() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
+                    placeholder="At least 8 characters"
                     required
                     style={{ paddingRight: '44px' }}
                   />

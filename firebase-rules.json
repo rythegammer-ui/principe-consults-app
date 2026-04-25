@@ -2,13 +2,46 @@
   "rules": {
     "accounts": {
       "$accountId": {
-        ".read": "auth != null && (auth.uid === $accountId || root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId)",
-        ".write": "auth != null && (auth.uid === $accountId || root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId)",
+        ".read": false,
+        ".write": false,
         "profile": {
-          ".read": "auth != null"
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId && root.child('userAccounts').child(auth.uid).child('role').val() === 'admin'",
+          "agencyName": {
+            ".read": "auth != null"
+          }
         },
         "users": {
-          ".read": "auth != null"
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
+        },
+        "settings": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId && root.child('userAccounts').child(auth.uid).child('role').val() === 'admin'"
+        },
+        "secrets": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId && root.child('userAccounts').child(auth.uid).child('role').val() === 'admin'"
+        },
+        "leads": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
+        },
+        "callLogs": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
+        },
+        "payments": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
+        },
+        "payoutRequests": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
+        },
+        "activityLog": {
+          ".read": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId",
+          ".write": "auth != null && root.child('userAccounts').child(auth.uid).child('accountId').val() === $accountId"
         }
       }
     },
@@ -16,13 +49,7 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.hasChildren(['accountId', 'userId']) && (!data.exists() || newData.child('accountId').val() === data.child('accountId').val())"
-      }
-    },
-    "emailIndex": {
-      "$emailKey": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".validate": "newData.hasChildren(['accountId', 'userId', 'role']) && ((!data.exists() && ((newData.child('accountId').val() === auth.uid && newData.child('role').val() === 'admin') || (root.child('accounts').child(newData.child('accountId').val()).child('profile').child('agencyName').exists() && newData.child('role').val() !== 'admin'))) || (data.exists() && newData.child('accountId').val() === data.child('accountId').val()))"
       }
     }
   }

@@ -7,6 +7,7 @@ import { formatDateTime } from '../../utils/formatters';
 
 export default function GHLMessaging({ lead }) {
   const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const addNotification = useAppStore(s => s.addNotification);
   const addActivity = useAppStore(s => s.addActivity);
   const currentUser = useAppStore(s => s.currentUser);
@@ -22,7 +23,7 @@ export default function GHLMessaging({ lead }) {
   const [emailSubject, setEmailSubject] = useState('');
   const [tab, setTab] = useState('send');
 
-  const apiKey = settings.ghlApiKey;
+  const apiKey = secrets?.ghlApiKey;
   const locationId = settings.ghlLocationId;
   const isConfigured = !!(apiKey && locationId);
   const contactId = ghlContact?.id || lead.ghlContactId || null;

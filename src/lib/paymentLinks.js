@@ -84,13 +84,14 @@ export async function sendPaymentLink(lead, tierKey, method) {
 
   try {
     // Find or create contact in GHL
+    const ghlApiKey = store.secrets?.ghlApiKey;
     let contactId = lead.ghlContactId;
-    if (!contactId && settings.ghlApiKey && settings.ghlLocationId) {
-      const existing = lead.phone ? await searchContact(settings.ghlApiKey, settings.ghlLocationId, lead.phone) : null;
+    if (!contactId && ghlApiKey && settings.ghlLocationId) {
+      const existing = lead.phone ? await searchContact(ghlApiKey, settings.ghlLocationId, lead.phone) : null;
       if (existing) {
         contactId = existing.id;
       } else {
-        const created = await createContact(settings.ghlApiKey, settings.ghlLocationId, lead);
+        const created = await createContact(ghlApiKey, settings.ghlLocationId, lead);
         contactId = created?.id;
       }
       if (contactId) store.updateLead(lead.id, { ghlContactId: contactId });
@@ -98,13 +99,13 @@ export async function sendPaymentLink(lead, tierKey, method) {
 
     if ((method === 'sms' || method === 'both') && contactId) {
       const smsText = buildSMSMessage(lead, tierKey);
-      await sendSMS(settings.ghlApiKey, contactId, smsText);
+      await sendSMS(ghlApiKey, contactId, smsText);
       results.sms = true;
     }
 
     if ((method === 'email' || method === 'both') && contactId) {
       const html = buildEmailHTML(lead, tierKey);
-      await sendEmail(settings.ghlApiKey, contactId, `Your ${tier.name} Package — ${settings.agencyName || 'Principe Consults'}`, html);
+      await sendEmail(ghlApiKey, contactId, `Your ${tier.name} Package — ${settings.agencyName || 'Principe Consults'}`, html);
       results.email = true;
     }
 

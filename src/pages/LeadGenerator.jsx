@@ -7,7 +7,7 @@ import { BUSINESS_TYPES, DFW_CITIES } from '../utils/formatters';
 import { formatPhone } from '../utils/formatters';
 
 export default function LeadGenerator() {
-  const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const addLead = useAppStore(s => s.addLead);
   const currentUser = useAppStore(s => s.currentUser);
   const addNotification = useAppStore(s => s.addNotification);
@@ -21,8 +21,9 @@ export default function LeadGenerator() {
   const [addedIds, setAddedIds] = useState(new Set());
 
   const generate = async () => {
-    if (!settings.anthropicApiKey) {
-      addNotification('Set your Anthropic API key in Settings first.', 'error');
+    const apiKey = secrets?.anthropicApiKey;
+    if (!apiKey) {
+      addNotification('Set your Anthropic API key in Settings → Integrations first.', 'error');
       return;
     }
 
@@ -32,7 +33,7 @@ export default function LeadGenerator() {
 
     try {
       const prompt = buildLeadGenPrompt(businessType, city, count, notes);
-      const responseText = await callClaude(settings.anthropicApiKey, LEAD_GEN_SYSTEM_PROMPT, prompt);
+      const responseText = await callClaude(apiKey, LEAD_GEN_SYSTEM_PROMPT, prompt);
       const leads = JSON.parse(responseText);
 
       if (!Array.isArray(leads)) throw new Error('Expected array of leads');

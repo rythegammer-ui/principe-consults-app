@@ -138,7 +138,7 @@ export function autoCheckSequences() {
 
 export async function generateSequenceCopy(lead, packageTier) {
   const store = useAppStore.getState();
-  const apiKey = store.settings.anthropicApiKey;
+  const apiKey = store.secrets?.anthropicApiKey;
   if (!apiKey) return null;
 
   try {

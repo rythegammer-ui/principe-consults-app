@@ -10,7 +10,7 @@ import { useIsMobile } from '../utils/hooks';
 
 export default function AIOutreach() {
   const leads = useAppStore(s => s.leads);
-  const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const updateLead = useAppStore(s => s.updateLead);
   const addActivity = useAppStore(s => s.addActivity);
   const addNotification = useAppStore(s => s.addNotification);
@@ -40,8 +40,9 @@ export default function AIOutreach() {
   };
 
   const generateForLead = async (lead) => {
-    if (!settings.anthropicApiKey) {
-      addNotification('Set your Anthropic API key in Settings first.', 'error');
+    const apiKey = secrets?.anthropicApiKey;
+    if (!apiKey) {
+      addNotification('Set your Anthropic API key in Settings → Integrations first.', 'error');
       return;
     }
 
@@ -55,7 +56,7 @@ export default function AIOutreach() {
 
     try {
       const prompt = buildOutreachPrompt(lead);
-      const responseText = await callClaude(settings.anthropicApiKey, OUTREACH_SYSTEM_PROMPT, prompt);
+      const responseText = await callClaude(apiKey, OUTREACH_SYSTEM_PROMPT, prompt);
       const messages = JSON.parse(responseText);
 
       updateLead(lead.id, {

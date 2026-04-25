@@ -6,13 +6,14 @@ import { searchContact, createContact, sendSMS } from '../../utils/ghl';
 
 export default function GHLSendButton({ lead, messageText, style = {} }) {
   const settings = useAppStore(s => s.settings);
+  const secrets = useAppStore(s => s.secrets);
   const addNotification = useAppStore(s => s.addNotification);
   const addActivity = useAppStore(s => s.addActivity);
   const currentUser = useAppStore(s => s.currentUser);
   const updateLead = useAppStore(s => s.updateLead);
   const [sending, setSending] = useState(false);
 
-  const apiKey = settings.ghlApiKey;
+  const apiKey = secrets?.ghlApiKey;
   const locationId = settings.ghlLocationId;
 
   if (!apiKey || !locationId || !lead.phone) return null;

@@ -23,8 +23,7 @@ export function getColdLeads() {
 
 export async function generateReengagementSequence(leads) {
   const store = useAppStore.getState();
-  const settings = store.settings;
-  const apiKey = settings.anthropicApiKey;
+  const apiKey = store.secrets?.anthropicApiKey;
 
   if (!apiKey) {
     store.addNotification('Set your Anthropic API key in Settings > Integrations', 'error');
